@@ -1,0 +1,36 @@
+{
+  "$comment": "Checked by scripts/perf-budget.mjs (pnpm perf) after pnpm build. Size budgets are ~1.25x the size recorded in `baseline` (stage 6, 2026-10-17). measured:false = plan target, not enforced yet (Phase 1).",
+  "budgets": [
+    {
+      "id": "cli-cold-start",
+      "unit": "ms",
+      "budget": 150,
+      "measured": true,
+      "how": "median of 11 runs of node apps/cli/dist/cli.mjs --help"
+    },
+    {
+      "id": "web-initial-js-gzip",
+      "unit": "KiB",
+      "budget": 287,
+      "baseline": 229.7,
+      "measured": true,
+      "how": "gzip -9 of the web entry chunk + its static imports (= __root__ preloads)"
+    },
+    {
+      "id": "web-total-js-gzip",
+      "unit": "KiB",
+      "budget": 298,
+      "baseline": 238.1,
+      "measured": true,
+      "how": "gzip -9 of every .js in apps/web/dist/client/assets"
+    },
+    { "id": "command-palette-open", "unit": "ms", "budget": 50, "measured": false },
+    { "id": "route-change", "unit": "ms", "budget": 100, "measured": false },
+    { "id": "gui-first-load-warm", "unit": "ms", "budget": 1000, "measured": false },
+    { "id": "local-agent-event-to-gui", "unit": "ms", "budget": 250, "measured": false },
+    { "id": "mcp-tool-call", "unit": "ms", "budget": 300, "measured": false },
+    { "id": "brain-search", "unit": "ms", "budget": 800, "measured": false },
+    { "id": "cloud-run-start", "unit": "ms", "budget": 15000, "measured": false },
+    { "id": "local-to-cloud-handoff", "unit": "ms", "budget": 10000, "measured": false }
+  ]
+}

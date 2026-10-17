@@ -36,7 +36,7 @@ export function CreateProjectDialog({ open, onOpenChange }: DialogProps) {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     create.mutate(
-      { name, repoUrl },
+      { name, repoUrl: repoUrl.trim() || undefined },
       {
         onSuccess: (p) => {
           toast.success(`Project ${p.name} created`);
@@ -55,7 +55,7 @@ export function CreateProjectDialog({ open, onOpenChange }: DialogProps) {
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>New project</DialogTitle>
-            <DialogDescription>A project links to one git repository.</DialogDescription>
+            <DialogDescription>A project can link to one git repository.</DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>
@@ -69,14 +69,13 @@ export function CreateProjectDialog({ open, onOpenChange }: DialogProps) {
               />
             </Field>
             <Field data-invalid={create.isError || undefined}>
-              <FieldLabel htmlFor="project-repo">Repository URL</FieldLabel>
+              <FieldLabel htmlFor="project-repo">Repository URL (optional)</FieldLabel>
               <Input
                 id="project-repo"
                 type="url"
                 placeholder="https://github.com/org/repo"
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)}
-                required
                 aria-invalid={create.isError || undefined}
               />
               {create.error && <FieldError>{create.error.message}</FieldError>}

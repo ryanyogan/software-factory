@@ -83,6 +83,15 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  apps/mcp:
+    devDependencies:
+      '@sf/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
   apps/web:
     dependencies:
       '@sf/contract':

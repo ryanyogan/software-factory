@@ -6,7 +6,7 @@ const opt = (v: string | undefined) => (v === undefined || v === '' ? undefined 
 export const inputs = {
   projectCreate: (a: { name: string; repo?: string }): CommandInput<'project.create'> => ({
     name: a.name,
-    repoUrl: opt(a.repo) as string,
+    repoUrl: opt(a.repo),
   }),
   taskCreate: (a: { project: string; title: string }): CommandInput<'task.create'> => ({
     projectId: a.project,

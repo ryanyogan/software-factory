@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Everything runs locally (miniflare/workerd); no Cloudflare account or secrets needed.
+      WRANGLER_SEND_METRICS: 'false'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      # Version comes from "packageManager" in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm perf
+
+      # Phase 0 gate: dev server + CLI + SSR page, all local. Uses the example dev vars
+      # (dev-only secret, SF_DEV_AUTH=1 loopback bypass). No browser needed.
+      - run: cp apps/api/.dev.vars.example apps/api/.dev.vars
+      - run: pnpm gate
+
+  # deploy:
+  #   needs: ci
+  #   if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+  #   runs-on: ubuntu-latest
+  #   env:
+  #     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  #     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: pnpm/action-setup@v4
+  #     - uses: actions/setup-node@v4
+  #       with: { node-version: 24, cache: pnpm }
+  #     - run: pnpm install --frozen-lockfile
+  #     - run: pnpm --filter @sf/api db:migrate:remote
+  #     - run: pnpm --filter @sf/api deploy   # wrangler deploy (api first: web binds to it)
+  #     - run: pnpm --filter @sf/web deploy   # vp build && wrangler deploy

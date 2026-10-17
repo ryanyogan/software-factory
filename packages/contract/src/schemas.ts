@@ -8,7 +8,7 @@ export const Id = z.string().min(1);
 export const Project = z.object({
   id: Id,
   name: z.string().min(1).max(200),
-  repoUrl: z.url(),
+  repoUrl: z.url().nullable(),
   createdAt: Timestamp,
 });
 export type Project = z.infer<typeof Project>;

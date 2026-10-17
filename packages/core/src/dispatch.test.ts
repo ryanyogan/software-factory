@@ -65,6 +65,14 @@ describe('dispatch', () => {
     expect(appended).toEqual([[run.id, { type: 'run.started', payload: run }]]);
   });
 
+  it('creates a project without a repo', async () => {
+    const project = await dispatch(ctx, 'project.create', { name: 'Scratch' });
+    expect(project.repoUrl).toBeNull();
+    expect(await dispatch(ctx, 'project.list', {})).toMatchObject({
+      projects: [{ id: project.id, repoUrl: null }],
+    });
+  });
+
   it('rejects invalid input', async () => {
     await expect(
       dispatch(ctx, 'project.create', { name: '', repoUrl: 'not a url' }),

@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "wrangler dev --port 8787",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "deploy": "wrangler deploy",
     "cf-typegen": "wrangler types --env-file .dev.vars.example",
     "typecheck": "pnpm cf-typegen >/dev/null && tsc --noEmit && tsc --noEmit -p test",
     "test": "vp test run",

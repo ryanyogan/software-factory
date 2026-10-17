@@ -56,7 +56,7 @@ export const handlers: Handlers = {
     const row: ProjectRow = {
       id: newId(ctx, 'prj'),
       name: input.name,
-      repoUrl: input.repoUrl,
+      repoUrl: input.repoUrl ?? null,
       createdAt: now(ctx),
     };
     await ctx.db.insert(projects).values(row);

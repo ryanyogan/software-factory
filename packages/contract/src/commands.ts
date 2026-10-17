@@ -4,8 +4,8 @@ import { Agent, Id, Project, Run, RunLocation, Task } from './schemas';
 
 export const projectCreate = defineCommand({
   name: 'project.create',
-  summary: 'Create a project linked to a git repository.',
-  input: z.object({ name: Project.shape.name, repoUrl: Project.shape.repoUrl }),
+  summary: 'Create a project, optionally linked to a git repository.',
+  input: z.object({ name: Project.shape.name, repoUrl: z.url().optional() }),
   output: Project,
   http: { method: 'POST', path: '/v1/projects' },
 });

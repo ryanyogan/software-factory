@@ -8,7 +8,7 @@ export * from './auth-schema';
 export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  repoUrl: text('repo_url').notNull(),
+  repoUrl: text('repo_url'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
 

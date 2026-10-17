@@ -4,7 +4,7 @@ import { type Column, record, shortTime, table } from './output';
 const projectCols: Column<Project>[] = [
   ['id', (p) => p.id],
   ['name', (p) => p.name],
-  ['repo', (p) => p.repoUrl],
+  ['repo', (p) => p.repoUrl ?? '-'],
   ['created', (p) => shortTime(p.createdAt)],
 ];
 const taskCols: Column<Task>[] = [
@@ -30,7 +30,7 @@ export const fmt = {
     record([
       ['id', p.id],
       ['name', p.name],
-      ['repo', p.repoUrl],
+      ['repo', p.repoUrl ?? '-'],
     ]),
   task: (t: Task) =>
     record([

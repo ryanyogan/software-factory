@@ -12,7 +12,8 @@
     "db:migrate:local": "pnpm --filter @sf/api db:migrate:local",
     "dev": "pnpm --filter @sf/web dev",
     "sf": "node apps/cli/dist/cli.mjs",
-    "gate": "bash scripts/gate.sh"
+    "gate": "bash scripts/gate.sh",
+    "perf": "node scripts/perf-budget.mjs"
   },
   "devDependencies": {
     "@sf/config": "workspace:*",

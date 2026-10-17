@@ -85,6 +85,7 @@ describe('arg → command mapping', () => {
       'project.create',
       { name: 'Demo', repoUrl: 'https://github.com/a/b' },
     ],
+    [project, ['create', '--name', 'Demo'], 'project.create', { name: 'Demo' }],
     [project, ['list'], 'project.list', {}],
     [
       task,

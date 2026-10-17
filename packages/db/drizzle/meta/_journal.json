@@ -15,6 +15,13 @@
       "when": 1792252496642,
       "tag": "0001_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792254425035,
+      "tag": "0002_nullable_repo_url",
+      "breakpoints": true
     }
   ]
 }
