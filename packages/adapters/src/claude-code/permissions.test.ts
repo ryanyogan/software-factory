@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vite-plus/test';
 import { createPathGuard } from './permissions';
 
@@ -32,6 +35,22 @@ describe('createPathGuard', () => {
       await guard('Bash', { command: 'rm x' }, { ...opts, blockedPath: '/home/u/.ssh' }),
     ).toMatchObject({
       behavior: 'deny',
+    });
+  });
+
+  it('denies a symlink inside the worktree that points outside it', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'sf-guard-'));
+    const work = join(tmp, 'work');
+    const outside = join(tmp, 'outside');
+    mkdirSync(work);
+    mkdirSync(outside);
+    symlinkSync(outside, join(work, 'escape'));
+    const real = createPathGuard([work]);
+    expect(await real('Write', { file_path: join(work, 'escape', 'x') }, opts)).toMatchObject({
+      behavior: 'deny',
+    });
+    expect(await real('Write', { file_path: join(work, 'new', 'y') }, opts)).toMatchObject({
+      behavior: 'allow',
     });
   });
 });

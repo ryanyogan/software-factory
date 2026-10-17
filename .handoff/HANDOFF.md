@@ -436,3 +436,10 @@ Observed: claim → session → message/tool/files → follow-up mid-turn → tu
 - Cancelled runs leave uncommitted changes in the task worktree (the next run on the task reuses it, dirty). Worktrees are never removed yet (`removeWorktree` exists, unused).
 - `run.update` without a state change but with sessionId/costUsd emits no event; the web learns cost from `turn.completed.usage.costUsd` or by re-fetching the run.
 - Web run view (stage 11) gets claude `file.change` paths absolute (worktree path); render the diff.snapshot instead.
+
+### Security fix: Claude adapter Bash sandbox (orchestrator, 2026-10-17)
+- An automated review flagged `createPathGuard` approving every Bash command, which no OS layer contained, so a shell command could write outside the worktree.
+- `claudeOptions` now passes `sandbox: defaultSandbox` = `{ enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false }` (overridable via `ClaudeCodeStartOptions.sandbox`). `failIfUnavailable` stays at its default of true, so a missing bubblewrap fails the run instead of running unsandboxed. Linux needs `bwrap` + `socat`, both present here.
+- The path guard now resolves symlinks through the nearest existing ancestor before its inside-the-roots check (test: a symlink inside the worktree that points outside is denied).
+- Verified with a real run: `echo hi > inside.txt` succeeds; `echo … > /home/ryan/code/x` fails with "Read-only file system". Writes to the Claude temp dir (`/tmp/claude-<uid>/…`) are allowed by the sandbox on purpose.
+- Network is not restricted (agents need package registries). Revisit an egress allowlist with cloud runs (Phase 3).

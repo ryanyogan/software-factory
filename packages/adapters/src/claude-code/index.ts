@@ -3,6 +3,7 @@ import type {
   Options,
   PermissionMode,
   query as queryFn,
+  SandboxSettings,
   SDKUserMessage,
   SettingSource,
 } from '@anthropic-ai/claude-agent-sdk';
@@ -27,7 +28,20 @@ export interface ClaudeCodeStartOptions extends StartAgentOptions {
   disallowedTools?: string[];
   maxTurns?: number;
   maxBudgetUsd?: number;
+  /**
+   * OS sandbox for Bash (bubblewrap on Linux, Seatbelt on macOS). Default: on, Bash auto-allowed only
+   * because it is sandboxed, no unsandboxed escape hatch, and the run fails if the sandbox is unavailable.
+   * The path guard only sees file-tool paths, so without this a shell command could reach outside the
+   * worktree. Matches Codex's `workspace-write`.
+   */
+  sandbox?: SandboxSettings;
 }
+
+export const defaultSandbox: SandboxSettings = {
+  enabled: true,
+  autoAllowBashIfSandboxed: true,
+  allowUnsandboxedCommands: false,
+};
 
 export interface ClaudeCodeDeps {
   /** Test seam: replaces `import('@anthropic-ai/claude-agent-sdk')`. */
@@ -62,6 +76,7 @@ export function claudeOptions(
     abortController,
     permissionMode: opts.permissionMode ?? 'acceptEdits',
     canUseTool: createPathGuard(roots),
+    sandbox: opts.sandbox ?? defaultSandbox,
     settingSources: opts.settingSources ?? ['project', 'local'],
     ...(opts.additionalDirectories?.length
       ? { additionalDirectories: opts.additionalDirectories }

@@ -87,7 +87,9 @@ describe('claude-code adapter', () => {
       settingSources: ['project', 'local'],
       resume: 'old-sess',
       pathToClaudeCodeExecutable: '/opt/claude',
+      sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false },
     });
+    expect(o.sandbox?.failIfUnavailable).toBeUndefined();
     expect(o.env).toEqual({ PATH: '/bin', HOME: '/h', CLAUDE_AGENT_SDK_CLIENT_APP: 'sf' });
     expect(typeof o.canUseTool).toBe('function');
     expect(seen.received[0]).toMatchObject({
