@@ -198,3 +198,48 @@ Live events: `src/lib/run-events.ts`. The browser opens `ws(s)://<web origin>/v1
 - api scripts added: `db:migrate:remote`, `deploy` (`wrangler deploy`). Root `README.md` with quickstart, commands, layout, Phase 1, deploy checklist.
 - Plan export is missing the Roadmap table (only the intro paragraph survived); README's "What's next" is derived from the v1 capability list.
 - All pass locally: check, typecheck, test (50), build, perf, gate.
+
+---
+
+## Goal of this build: Phase 1 "Local loop" (started 2026-10-17)
+
+From the plan doc's roadmap widget (lost in the export): **1 · Local loop, 5 weeks. Scope: daemon wraps Claude Code and Codex;
+live run view, worktrees, PRs. Gate: 5 engineers use it daily for a full week.** Later phases (do NOT build now): 2 brain + MCP +
+skills sync; 3 cloud Sandbox, `sf push`/`sf pull`, preview URLs, embedded terminal; 4 final review gate, Slack; 5 replace Obvious.
+
+The human gate can't be automated, so the **technical gate** for this build is `pnpm gate:local` (stage 12): dev server + `sf daemon`
+running; in a temp git repo `sf run start` with the `fake` agent → daemon claims it, makes the task worktree, agent events stream to
+the RunLog, the web run page shows transcript + per-turn diff, a follow-up message sent through the API reaches the agent, the run
+ends in `review` with a commit on the task branch and a PR recorded (PR provider faked in the gate). Measure "local agent event to
+GUI" p95 against the 250 ms budget and record it in `perf-budget.json`.
+
+### Phase 1 decisions (chosen by the orchestrator; revisit only with evidence)
+1. **Daemon** = `sf daemon`, a long-running Node process in `apps/cli` (lazy-imported subcommand). It serves the local repos linked
+   with `sf link` (config maps repo path ↔ projectId). It learns about queued `local` runs over a WebSocket (ProjectRoom broadcast
+   per linked project, no polling) and claims one atomically with a `run.claim` command (D1 conditional update). One daemon per machine.
+2. **Adapters** (`packages/adapters`) use official SDKs, not screen-scraping: Claude Code via `@anthropic-ai/claude-agent-sdk`,
+   Codex via `@openai/codex-sdk`, plus a scripted `fake` adapter for tests/gate. OpenCode is deferred. Every adapter emits one
+   normalized `AgentEvent` union defined in `@sf/contract` (assistant text, tool call/result, usage+cost, error, turn end, session id
+   for resume). Adapters accept follow-up user messages mid-run (or resume the session between turns).
+3. **Worktrees**: one per Task on the task's `branch`, at `$XDG_DATA_HOME/sf/worktrees/<projectId>/<taskId>` (default
+   `~/.local/share/sf/...`), reused across that task's runs. Agents run with cwd = worktree, in an auto-edit permission mode scoped
+   to it.
+4. **Events**: the daemon writes to RunLog over WebSocket (bidirectional: it also receives follow-ups/cancel from the same socket),
+   with an HTTP batch endpoint as fallback. After each agent turn the daemon appends a `diff.snapshot` (git diff vs the base).
+   Run state transitions (queued → running → review/failed/abandoned) go through contract commands so all surfaces agree.
+5. **PRs**: at run end the daemon commits to the task branch; with `openPr` (default true when the repo has a GitHub remote) it
+   pushes and opens a draft PR with the local `gh` CLI behind a `PrProvider` interface (faked in tests/gate), and records `prUrl`.
+6. **Live run view** (web): transcript, tool calls, per-turn unified diff, state, cost, PR link, a follow-up box (steer), cancel.
+   Terminal and preview are Phase 3. Every new action keeps the copy-as-CLI box.
+7. **Context resolution** for `sf run` in a repo: cwd → linked project (or git remote → `project.repoUrl`), branch → task.
+8. Real agents: tests never spend tokens. Each adapter gets ONE manual smoke run with a trivial prompt in a throwaway repo.
+9. Each stage ends with `pnpm check && pnpm typecheck && pnpm test && pnpm build && pnpm gate` passing and one local git commit
+   (no remote exists; never push).
+
+### Phase 1 stages
+- 7 research → `.handoff/phase1-research.md`
+- 8 contract + core + db + api: run lifecycle, AgentEvent/RunEvent schemas, `run.claim`/`run.update`/events ingest, daemon WS, ProjectRoom broadcast
+- 9 `packages/adapters`: claude-code, codex, fake
+- 10 `sf daemon`, `sf link`, `sf run` context resolution, worktrees, diff snapshots, follow-ups, commit/PR, `sf open`
+- 11 web live run view + Needs-you updates
+- 12 `pnpm gate:local`, perf measurement, README/AGENTS updates
