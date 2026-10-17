@@ -23,7 +23,8 @@ pnpm monorepo (pnpm 11, node 24) on VoidZero tooling via Vite+ (`vp`). Build log
 - `packages/contract` — zod command definitions (`commands` registry) + typed HTTP `createClient`. The one API.
 - `packages/core` — handlers keyed by command name + `dispatch(ctx, name, rawInput)`.
 - `packages/db` — Drizzle schema for D1; migrations in `packages/db/drizzle`.
-- `packages/ui` — shadcn/ui components (stage 4). `packages/adapters`, `packages/brain` — stubs.
+- `packages/ui` — shadcn/ui components (stage 4). `packages/brain` — stub.
+- `packages/adapters` — agent adapters (`claude-code`, `codex`, `fake`) behind one `AgentSession` interface; SDKs are lazy-imported (subpaths `@sf/adapters/<name>`). Manual real-agent smoke: `pnpm --filter @sf/adapters smoke <agent> <scratch-dir>` (spends tokens).
 - `packages/config` — shared `tsconfig.base.json`.
 
 Internal packages export TypeScript source directly (`exports: "./src/index.ts"`); no build step.

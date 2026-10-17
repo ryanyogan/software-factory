@@ -302,3 +302,67 @@ Authorization decision: reads open to any signed-in user (no project ACLs yet); 
 - Web (stage 11): use `parseRunEvent` for typed rendering; Phase 0 `run.started` payloads lack the new Run fields and parse to null — render them raw. The ProjectRoom is also usable by the GUI (viewer) for live "Needs you".
 - Local dev caveat still applies: DO sockets are per process; point daemon + browser at the same server (5173).
 - `run.events` REST GET shares its path with the WS upgrade route; the upgrade header decides.
+
+### Stage 9: adapters (2026-10-17)
+
+**Package** `packages/adapters` (`@sf/adapters`): deps `@anthropic-ai/claude-agent-sdk@0.3.302`, `@openai/codex-sdk@0.163.0`, `@sf/contract`, `zod`; devDeps `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk` (types only), `tsx` (smoke script). Scripts: `typecheck`, `test` (32 tests, no tokens), `smoke`.
+Exports (TS source, like the other internal packages): `@sf/adapters` (types, `loadAdapter`, `startAgent`, `isAdapterName`, `buildAgentEnv`, `API_KEY_VARS`, `findOnPath`, `resolveBinary`; imports NO SDK), `@sf/adapters/claude-code`, `@sf/adapters/codex`, `@sf/adapters/fake`. Each adapter module imports its SDK only inside `start()` (`await import(...)`); `loadAdapter` uses `import('./<name>/index')`, so a bundler splits each adapter into a lazy chunk. Verified with `vp pack --deps.never-bundle @anthropic-ai/claude-agent-sdk --deps.never-bundle @openai/codex-sdk`: the output kept `import("@anthropic-ai/claude-agent-sdk")` / `import("@openai/codex-sdk")` external, with one small chunk per adapter.
+
+**Interface** (`src/types.ts`)
+```ts
+type AdapterName = 'claude-code' | 'codex' | 'fake';
+type BinaryChoice = 'auto' | 'bundled' | string /* absolute path */;
+interface StartAgentOptions { cwd; prompt; resumeSessionId?; signal?: AbortSignal;
+  env?: Record<string,string|undefined> /* base, default process.env */; extraEnv?; allowApiKeys? /* default false */;
+  model?; binary?: BinaryChoice /* default 'auto' */; additionalDirectories?; onStderr? }
+interface AgentSession { agent; events: AsyncIterable<AgentEvent> /* single consumer, ends when the session ends */;
+  sessionId: string|null; idle: boolean /* no turn running, nothing queued */;
+  send(text): void /* throws once closed */; end(): void /* finish queued work, then stop */; cancel(): void /* stop now */;
+  result: Promise<AgentResult> /* never rejects */ }
+interface AgentResult { ok; cancelled; sessionId; costUsd? /* sum of per-turn deltas; undefined for codex */;
+  usage: { inputTokens /* incl. cached */, outputTokens, cachedInputTokens }; turns; error? }
+interface AgentAdapter { name; start(o: StartAgentOptions): Promise<AgentSession> }
+loadAdapter(name: string): Promise<AgentAdapter>          // throws for 'opencode'/unknown
+startAgent({ agent, ...StartAgentOptions, ...adapterSpecific }): Promise<AgentSession>
+```
+A session does NOT end when a turn finishes. It waits for `send()` until `end()` or `cancel()`. `idle` is already updated when the consumer receives `turn.completed`, so `if (ev.type === 'turn.completed' && s.idle)` is reliable. A thrown SDK error (claude) or a fatal `error` event ends the session with `ok:false, error`. A failed codex/fake turn is non-fatal: you get `error{fatal:false}` + `turn.completed{isError:true}`, the session stays usable, and `ok` reflects the LAST turn.
+
+**Per-adapter semantics**
+| | claude-code | codex | fake |
+|---|---|---|---|
+| process | one long-lived CLI process per session (streaming input; `prompt` = async iterable inbox) | a new `codex exec --experimental-json [resume id]` per turn | in-process |
+| follow-up `send` | pushed into the live session at once. **Verified live: a message sent mid-turn (no `priority`) was folded into the running turn between tool calls**, so one `result` covered both (`user_message_uuids` had 2 entries) | queued; runs as the next turn on the same thread once the current one finishes; several queued messages are joined with `\n\n` | same as codex |
+| idle tracking | each sent message gets a uuid; `result.user_message_uuids` clears them | queue empty + no turn running | same |
+| cancel | `abortController.abort()` + close the inbox + `q.close()` | aborts the turn's `AbortController` (SIGTERM to the child), drops the queue | aborts sleeps, nothing more is written |
+| resume | `options.resume = id` (same session id comes back) | `codex.resumeThread(id, threadOpts)` (same thread id) | reuses `resumeSessionId` as the session id |
+| cost | `total_cost_usd` is cumulative → per-turn delta. **On resume the total continues from the transcript (verified)** → pass `costBaseUsd` (the session's earlier total) or the first delta re-counts it | none (ChatGPT plan) | `costUsd` per scripted turn (default 0.01) |
+| usage | `result.usage` is per turn (main loop). inputTokens = input + cache_creation + cache_read | **`turn.completed.usage` is CUMULATIVE for the thread, and continues across resume (verified live: output 63 → 126 → 131)** → the mapper emits deltas; pass `usageBase` on resume | per turn |
+| permissions | `permissionMode:'acceptEdits'` + `canUseTool` = `createPathGuard([cwd, ...additionalDirectories])` (allows any tool, denies `file_path`/`notebook_path`/`path`/`blockedPath` outside the roots) + `settingSources:['project','local']` | `sandboxMode:'workspace-write'`, `approvalPolicy:'never'`, `skipGitRepoCheck:true` | writes only inside cwd (escape → failed turn) |
+| env | `buildAgentEnv` (full base env minus `ANTHROPIC_API_KEY`/`CODEX_API_KEY`/`OPENAI_API_KEY` unless `allowApiKeys`) + `CLAUDE_AGENT_SDK_CLIENT_APP=sf` | same (passed as `CodexOptions.env`) | reads `SF_FAKE_SCRIPT` from it |
+| binary | `binary:'auto'` = `claude` on PATH → `pathToClaudeCodeExecutable`, else the bundled one | `codex` on PATH → `codexPathOverride` | – |
+| extra options | `costBaseUsd`, `permissionMode`, `settingSources`, `disallowedTools`, `maxTurns`, `maxBudgetUsd` (`ClaudeCodeStartOptions`) | `sandboxMode`, `networkAccessEnabled`, `modelReasoningEffort`, `usageBase` (`CodexStartOptions`) | `fakeScript` (`FakeStartOptions`) |
+
+Mapping follows research §3. Claude skips subagent traffic (`parent_tool_use_id`), replays, and all other message kinds. `file.change` comes from successful Write (`add`) / Edit / MultiEdit / NotebookEdit (`update`) tool results, with the path ABSOLUTE as given to the tool. `TodoWrite` → `tool.call` + `todo`. Empty thinking blocks are dropped (Opus 5.5 returns empty thinking by default). Codex emits `file.change` only for `file_change` items. In the smoke run it wrote files with `printf` in `shell`, so no `file.change` appeared. **Use `diff.snapshot` as the source of truth for changes.** Tool output is capped to `TOOL_OUTPUT_MAX` (`truncated: true`).
+
+**Fake script** (`src/fake/script.ts`, zod `FakeScript`): `{ sessionId?, stepDelayMs=0, turns?: FakeTurn[], followUp?: FakeTurn }`, `FakeTurn = { steps, costUsd=0.01, result? }`. Steps are `message | reasoning | write{path,content} | tool{name,input?,output?,isError?} | todo{items} | sleep{ms} | burst{count,intervalMs,text}` (for latency) `| error{message,fatal}` (fatal ends the session) `| fail{message}` (failed turn). Templates: `{{prompt}} {{turn}} {{i}}`. Source order: `fakeScript` option > `SF_FAKE_SCRIPT` env (inline JSON or a path to a .json file) > `defaultFakeScript`. The default writes `sf-fake-turn-<n>.md` (`# Turn n\n\n<prompt>\n`) on every turn, so turn 1 and each follow-up produce a diff. Messages: "Working on: …" / "Follow-up received: …" / "Done with turn n.". Session id `fake-<uuid>`.
+
+**Smoke runs** (`pnpm --filter @sf/adapters smoke <claude-code|codex> <scratch-dir> [--record]`, script `packages/adapters/scripts/smoke.ts`). Each run makes a throwaway git repo, prompts "create hello.txt containing hi", sends "also create bye.txt" on the first `tool.call`, calls `end()` when idle, then resumes the session for "reply ok". `--record` writes redacted raw SDK messages to `packages/adapters/fixtures/<agent>/smoke.jsonl`. Redaction maps home → `~`, the user name → `user`, drops rate-limit events and mcp/plugin/skill inventories, and blanks account/org keys. `src/recorded.test.ts` replays both fixtures through the mappers.
+- claude-code: PASS (about 10 s, about $0.19 estimated on the Max plan). init `apiKeySource: 'none'` (the subscription login was used, with ANTHROPIC_API_KEY stripped). Both files were created. Resume returned the same session id with `total_cost_usd` 0.1830 → 0.1946.
+- codex: PASS (about 20 s). The ChatGPT login was used (`codex login status` → "Logged in using ChatGPT"; no API key). The follow-up ran as turn 2 on the same thread, and resume kept the thread id `01a14c1c-…`.
+- **Research UNVERIFIED items:**
+  1. One `result` per turn in streaming mode: the `.d.ts` says so ("exactly one result message per turn"). Live, the folded turn produced exactly one result. Two separate turns inside one query were not exercised live.
+  2. `total_cost_usd` is cumulative per query() call (running total). This is confirmed by the `.d.ts` and live, including that it continues across resume.
+  3. `priority`: the `.d.ts` does not document what it means. With the default (no priority), a mid-turn message folds into the running turn. The adapter never sets `priority`.
+  4. Codex login path: CONFIRMED.
+
+**Gotchas for stage 10 (daemon)**
+- Bundling: the CLI's tsdown config must bundle `@sf/adapters` (workspace TS source, like `@sf/contract`) and mark `@anthropic-ai/claude-agent-sdk` and `@openai/codex-sdk` never-bundle. Add both SDKs as real `dependencies` of `@sf/cli` so they resolve at runtime. Only import `@sf/adapters` (or call `loadAdapter`) from the lazy `sf daemon` subcommand. Note that `deps.onlyBundle: ['citty','zod']` in `apps/cli/vite.config.ts` probably needs `@sf/*` or an explicit `neverBundle` list.
+- The contract `Agent` enum is `claude-code | codex | opencode` and has **no `fake`**. Stage 10/12 must add `fake` (maybe dev-only) for the gate, or map it. `loadAdapter('opencode')` throws, so fail the run with a clear error.
+- Map events → RunLog as `{ type: 'agent', payload: ev, emittedAt: Date.now(), key }`. After each `turn.completed`, append a `diff.snapshot`, and set `run.update { costUsd: run.costUsd + ev.usage.costUsd, sessionId }` once `session.started` arrives.
+- Follow-up to a live session: call `session.send(text)`. For a `review` run whose session ended: `run.update state=running`, then `startAgent({ resumeSessionId: run.sessionId, prompt: text, costBaseUsd /* claude: previous total for that session */ })`. Codex token deltas on resume need `usageBase` (optional, display only).
+- Cancel: `run.cancel_requested` or a `run.state → abandoned` → `session.cancel()`, `await session.result`, then `run.update state=abandoned`.
+- Run end: when `turn.completed && session.idle` → decide `review` (`ok`) or `failed`. Keep the session warm for follow-ups, or `end()` it and resume later. Claude keeps a CLI process alive while idle; Codex/fake hold nothing between turns.
+- Claude `file.change` paths are absolute and Codex paths are as reported. Relativize to the worktree if needed.
+- `binary:'auto'` follows whatever `claude`/`codex` is on PATH (here both are mise installs, 2.1.302 / 0.163.0, matching the SDKs). If they drift, use `binary:'bundled'`.
+- Claude `settingSources: ['project','local']` ignores the user's global settings and permission rules on purpose.
+- Smoke repos are left in the scratch dir. Tests never spawn an agent.

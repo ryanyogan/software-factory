@@ -1,0 +1,18 @@
+{"phase":"run1","t":280,"msg":{"type":"thread.started","thread_id":"01a14c1c-4241-7ca0-9ab0-9b68747968fa"}}
+{"phase":"run1","t":820,"msg":{"type":"turn.started"}}
+{"phase":"run1","t":5112,"msg":{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll create `hello.txt` containing exactly `hi`.\n"}}}
+{"phase":"run1","t":6120,"msg":{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/bash -lc 'printf hi > hello.txt'","aggregated_output":"","exit_code":null,"status":"in_progress"}}}
+{"phase":"run1","t":6120,"msg":{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/bash -lc 'printf hi > hello.txt'","aggregated_output":"","exit_code":0,"status":"completed"}}}
+{"phase":"run1","t":7702,"msg":{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Created `hello.txt` containing exactly `hi`."}}}
+{"phase":"run1","t":7715,"msg":{"type":"turn.completed","usage":{"input_tokens":40012,"cached_input_tokens":32000,"cache_write_input_tokens":0,"output_tokens":63,"reasoning_output_tokens":0}}}
+{"phase":"run1","t":10850,"msg":{"type":"thread.started","thread_id":"01a14c1c-4241-7ca0-9ab0-9b68747968fa"}}
+{"phase":"run1","t":10867,"msg":{"type":"turn.started"}}
+{"phase":"run1","t":13155,"msg":{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll create `bye.txt` containing exactly `bye`.\n"}}}
+{"phase":"run1","t":13476,"msg":{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/bash -lc 'printf bye > bye.txt'","aggregated_output":"","exit_code":null,"status":"in_progress"}}}
+{"phase":"run1","t":13477,"msg":{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/bash -lc 'printf bye > bye.txt'","aggregated_output":"","exit_code":0,"status":"completed"}}}
+{"phase":"run1","t":14679,"msg":{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Created `bye.txt` containing exactly `bye`."}}}
+{"phase":"run1","t":14696,"msg":{"type":"turn.completed","usage":{"input_tokens":80299,"cached_input_tokens":71808,"cache_write_input_tokens":0,"output_tokens":126,"reasoning_output_tokens":0}}}
+{"phase":"resume","t":15742,"msg":{"type":"thread.started","thread_id":"01a14c1c-4241-7ca0-9ab0-9b68747968fa"}}
+{"phase":"resume","t":15956,"msg":{"type":"turn.started"}}
+{"phase":"resume","t":19630,"msg":{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}}
+{"phase":"resume","t":19672,"msg":{"type":"turn.completed","usage":{"input_tokens":100529,"cached_input_tokens":91776,"cache_write_input_tokens":0,"output_tokens":131,"reasoning_output_tokens":0}}}
