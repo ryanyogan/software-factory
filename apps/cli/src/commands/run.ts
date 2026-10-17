@@ -22,6 +22,7 @@ const start = defineCommand({
       default: 'local',
       description: 'Where the run executes',
     },
+    prompt: { type: 'string', required: true, description: 'Instruction for the agent' },
   },
   run: ({ args }) =>
     action(args, () => apiClient(args).call('run.start', inputs.runStart(args)), fmt.run),

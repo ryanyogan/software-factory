@@ -47,7 +47,10 @@ export const fmt = {
       ['state', r.state],
       ['agent', r.agent],
       ['location', r.location],
+      ['prompt', r.prompt || '-'],
       ['by', r.startedBy],
+      ['machine', r.claimedBy ?? '-'],
+      ['pr', r.prUrl ?? '-'],
       ['created', shortTime(r.createdAt)],
     ]),
 };

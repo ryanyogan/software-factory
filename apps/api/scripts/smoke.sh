@@ -14,7 +14,7 @@ PROJECT=$(call project.create '{"name":"Smoke","repoUrl":"https://github.com/acm
 echo "project:     $PROJECT"
 TASK=$(call task.create "{\"projectId\":\"$PROJECT\",\"title\":\"Smoke task\"}" | field id)
 echo "task:        $TASK"
-RUN=$(call run.start "{\"taskId\":\"$TASK\",\"agent\":\"claude-code\"}" | field id)
+RUN=$(call run.start "{\"taskId\":\"$TASK\",\"agent\":\"claude-code\",\"prompt\":\"smoke\"}" | field id)
 echo "run:         $RUN"
 COUNT=$(call run.list "{\"taskId\":\"$TASK\"}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).runs.length))')
 [ "$COUNT" = 1 ] || { echo "run.list expected 1 run, got $COUNT"; exit 1; }

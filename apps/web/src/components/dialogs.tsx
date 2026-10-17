@@ -10,6 +10,7 @@ import {
 } from '@sf/ui/components/dialog';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@sf/ui/components/field';
 import { Input } from '@sf/ui/components/input';
+import { Textarea } from '@sf/ui/components/textarea';
 import {
   Select,
   SelectContent,
@@ -155,13 +156,14 @@ const LOCATIONS: RunLocation[] = ['local', 'cloud'];
 export function StartRunDialog({ open, onOpenChange, taskId }: DialogProps & { taskId: string }) {
   const [agent, setAgent] = useState<Agent>('claude-code');
   const [location, setLocation] = useState<RunLocation>('local');
+  const [prompt, setPrompt] = useState('');
   const start = useStartRun();
   const navigate = useNavigate();
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     start.mutate(
-      { taskId, agent, location },
+      { taskId, agent, location, prompt },
       {
         onSuccess: (run) => {
           toast.success('Run queued', { description: run.id });
@@ -181,6 +183,18 @@ export function StartRunDialog({ open, onOpenChange, taskId }: DialogProps & { t
             <DialogDescription>Queue an agent run for this task.</DialogDescription>
           </DialogHeader>
           <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="run-prompt">Prompt</FieldLabel>
+              <Textarea
+                id="run-prompt"
+                required
+                autoFocus
+                rows={4}
+                placeholder="What should the agent do?"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+              />
+            </Field>
             <Field>
               <FieldLabel htmlFor="run-agent">Agent</FieldLabel>
               <Select value={agent} onValueChange={(v) => setAgent(v as Agent)}>
@@ -217,7 +231,7 @@ export function StartRunDialog({ open, onOpenChange, taskId }: DialogProps & { t
               {start.error && <FieldError>{start.error.message}</FieldError>}
             </Field>
           </FieldGroup>
-          <CopyCli command={cli.runStart(taskId, agent, location)} />
+          <CopyCli command={cli.runStart(taskId, agent, location, prompt || '<prompt>')} />
           <DialogFooter>
             <Button type="submit" disabled={start.isPending}>
               Start run

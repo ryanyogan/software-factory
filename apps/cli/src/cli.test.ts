@@ -27,8 +27,16 @@ const run1 = {
   agent: 'codex',
   location: 'cloud',
   state: 'queued',
+  prompt: 'Add a login page',
+  openPr: true,
   createdAt: NOW,
   startedBy: 'dev',
+  claimedBy: null,
+  claimedAt: null,
+  sessionId: null,
+  prUrl: null,
+  costUsd: null,
+  endedAt: null,
 };
 
 const RESPONSES: Record<string, unknown> = {
@@ -96,15 +104,15 @@ describe('arg → command mapping', () => {
     [task, ['list', '--project', 'prj_1'], 'task.list', { projectId: 'prj_1' }],
     [
       run,
-      ['start', '--task', 'tsk_1', '--agent', 'codex', '--location', 'cloud'],
+      ['start', '--task', 'tsk_1', '--agent', 'codex', '--location', 'cloud', '--prompt', 'Do X'],
       'run.start',
-      { taskId: 'tsk_1', agent: 'codex', location: 'cloud' },
+      { taskId: 'tsk_1', agent: 'codex', location: 'cloud', prompt: 'Do X' },
     ],
     [
       run,
-      ['start', '--task', 'tsk_1', '--agent', 'claude-code'],
+      ['start', '--task', 'tsk_1', '--agent', 'claude-code', '--prompt', 'Do Y'],
       'run.start',
-      { taskId: 'tsk_1', agent: 'claude-code', location: 'local' },
+      { taskId: 'tsk_1', agent: 'claude-code', location: 'local', prompt: 'Do Y' },
     ],
     [run, ['list'], 'run.list', {}],
     [run, ['list', '--task', 'tsk_1'], 'run.list', { taskId: 'tsk_1' }],
@@ -149,7 +157,7 @@ describe('output', () => {
   });
 
   it('--json prints the raw command output', async () => {
-    await sf(run, ['start', '--task', 'tsk_1', '--agent', 'codex', '--json']);
+    await sf(run, ['start', '--task', 'tsk_1', '--agent', 'codex', '--prompt', 'p', '--json']);
     expect(JSON.parse(stdout.join(''))).toEqual(run1);
   });
 

@@ -2,6 +2,8 @@ import { type CommandName, CommandError, type CommandOutput, type ParsedInput } 
 import { projects, runs, tasks, type ProjectRow, type RunRow, type TaskRow } from '@sf/db';
 import { desc, eq } from 'drizzle-orm';
 import type { Ctx } from './context';
+import { runHandlers } from './run-lifecycle';
+import { newId, now, toRun } from './rows';
 
 export type Handler<N extends CommandName> = (
   ctx: Ctx,
@@ -9,10 +11,6 @@ export type Handler<N extends CommandName> = (
 ) => Promise<CommandOutput<N>>;
 
 export type Handlers = { [N in CommandName]: Handler<N> };
-
-const now = (ctx: Ctx) => (ctx.now ? ctx.now() : new Date());
-const newId = (ctx: Ctx, prefix: string) =>
-  ctx.newId ? ctx.newId(prefix) : `${prefix}_${crypto.randomUUID().replaceAll('-', '')}`;
 
 export function slugify(title: string): string {
   const slug = title
@@ -38,16 +36,6 @@ const toTask = (r: TaskRow): CommandOutput<'task.create'> => ({
   title: r.title,
   branch: r.branch,
   status: r.status,
-  createdAt: r.createdAt.toISOString(),
-});
-
-const toRun = (r: RunRow): CommandOutput<'run.get'> => ({
-  id: r.id,
-  taskId: r.taskId,
-  agent: r.agent,
-  location: r.location,
-  state: r.state,
-  startedBy: r.startedBy,
   createdAt: r.createdAt.toISOString(),
 });
 
@@ -97,7 +85,7 @@ export const handlers: Handlers = {
 
   async 'run.start'(ctx, input) {
     const [task] = await ctx.db
-      .select({ id: tasks.id })
+      .select({ id: tasks.id, projectId: tasks.projectId })
       .from(tasks)
       .where(eq(tasks.id, input.taskId));
     if (!task) throw new CommandError('not_found', `task ${input.taskId} not found`);
@@ -108,12 +96,23 @@ export const handlers: Handlers = {
       agent: input.agent,
       location: input.location,
       state: 'queued',
+      prompt: input.prompt,
+      openPr: input.openPr,
       startedBy: ctx.userId,
       createdAt: now(ctx),
+      claimedBy: null,
+      claimedAt: null,
+      sessionId: null,
+      prUrl: null,
+      costUsd: null,
+      endedAt: null,
     };
     await ctx.db.insert(runs).values(row);
     const run = toRun(row);
-    await ctx.events?.appendRunEvent(run.id, { type: 'run.started', payload: run });
+    await ctx.events?.append(run.id, [{ type: 'run.started', payload: run }]);
+    if (run.location === 'local') {
+      await ctx.events?.notifyProject(task.projectId, { type: 'run.queued', run });
+    }
     return run;
   },
 
@@ -130,4 +129,6 @@ export const handlers: Handlers = {
     );
     return { runs: rows.map(toRun) };
   },
+
+  ...runHandlers,
 };

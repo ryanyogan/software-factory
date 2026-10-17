@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 // Better Auth tables (user, session, account, verification, device_code) are generated into
 // ./auth-schema.ts by `pnpm --filter @sf/api auth:schema`; do not hand-edit that file.
@@ -48,12 +48,22 @@ export const runs = sqliteTable(
         'final_review',
         'merged',
         'abandoned',
+        'failed',
       ],
     })
       .notNull()
       .default('queued'),
     startedBy: text('started_by').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    // Stage 8 (0003_run_lifecycle): plain ADD COLUMNs. Legacy rows get prompt '' / open_pr 1.
+    prompt: text('prompt').notNull().default(''),
+    openPr: integer('open_pr', { mode: 'boolean' }).notNull().default(true),
+    claimedBy: text('claimed_by'),
+    claimedAt: integer('claimed_at', { mode: 'timestamp_ms' }),
+    sessionId: text('session_id'),
+    prUrl: text('pr_url'),
+    costUsd: real('cost_usd'),
+    endedAt: integer('ended_at', { mode: 'timestamp_ms' }),
   },
   (t) => [index('runs_task_idx').on(t.taskId)],
 );

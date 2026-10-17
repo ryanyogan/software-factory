@@ -23,8 +23,8 @@ export const cli = {
   taskCreate: (projectId: string, title: string) =>
     sf('task create', { project: projectId, title }),
   taskList: (projectId: string) => sf('task list', { project: projectId }),
-  runStart: (taskId: string, agent: string, location: string) =>
-    sf('run start', { task: taskId, agent, location }),
+  runStart: (taskId: string, agent: string, location: string, prompt: string) =>
+    sf('run start', { task: taskId, agent, location, prompt }),
   runList: (taskId?: string) => sf('run list', { task: taskId }),
   runGet: (id: string) => sf('run get', {}, [id]),
 };

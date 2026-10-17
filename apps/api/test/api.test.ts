@@ -20,7 +20,7 @@ async function seedRun() {
     repoUrl: 'https://github.com/acme/p',
   });
   const task = await command('task.create', { projectId: project.body.id, title: 'T' });
-  return command('run.start', { taskId: task.body.id, agent: 'codex' });
+  return command('run.start', { taskId: task.body.id, agent: 'codex', prompt: 'do it' });
 }
 
 describe('HTTP /v1', () => {
@@ -58,6 +58,7 @@ describe('RunLog', () => {
   it('run.start appends run.started to the run log', async () => {
     const run = await seedRun();
     const events: StoredRunEvent[] = await env.RUN_LOG.getByName(String(run.body.id)).list();
+
     expect(events).toMatchObject([{ seq: 1, type: 'run.started', payload: { id: run.body.id } }]);
   });
 
@@ -180,5 +181,198 @@ describe('dev sign-in (SF_DEV_AUTH)', () => {
 
   it('is refused on a non-loopback host', async () => {
     expect((await signIn('https://sf.example.com')).status).not.toBe(200);
+  });
+});
+
+/* ---------------------------------------------------------------- stage 8: run lifecycle */
+
+const M1 = 'mch_test_1';
+
+/** Collects JSON frames from a client WebSocket; `next(pred)` waits for a matching frame. */
+function frames(ws: WebSocket) {
+  const got: Record<string, unknown>[] = [];
+  const waiters: {
+    pred: (f: Record<string, unknown>) => boolean;
+    resolve: (f: Record<string, unknown>) => void;
+  }[] = [];
+  ws.addEventListener('message', (m) => {
+    if (typeof m.data !== 'string' || m.data === 'pong') return;
+    const f = JSON.parse(m.data) as Record<string, unknown>;
+    got.push(f);
+    for (const w of [...waiters]) {
+      if (w.pred(f)) {
+        waiters.splice(waiters.indexOf(w), 1);
+        w.resolve(f);
+      }
+    }
+  });
+  ws.accept();
+  return {
+    got,
+    next(pred: (f: Record<string, unknown>) => boolean): Promise<Record<string, unknown>> {
+      const hit = got.find(pred);
+      if (hit) return Promise.resolve(hit);
+      return new Promise((resolve, reject) => {
+        waiters.push({ pred, resolve });
+        setTimeout(() => reject(new Error(`timeout; got ${JSON.stringify(got)}`)), 2000);
+      });
+    },
+  };
+}
+
+async function openWs(path: string, headers: Record<string, string> = {}) {
+  const res = await exports.default.fetch(`${LOCAL}${path}`, {
+    headers: { upgrade: 'websocket', ...headers },
+  });
+  return res;
+}
+
+async function claimedRun() {
+  const run = await seedRun();
+  const id = String(run.body.id);
+  const claim = await command('run.claim', { id, machineId: M1 });
+  expect(claim.status).toBe(200);
+  return { id };
+}
+
+const agentMsg = (text: string, key?: string) => ({
+  type: 'agent',
+  payload: { type: 'message', role: 'assistant', text },
+  emittedAt: Date.now(),
+  ...(key ? { key } : {}),
+});
+
+describe('run.claim over HTTP', () => {
+  it('returns 409 conflict for a second claim', async () => {
+    const run = await seedRun();
+    const id = String(run.body.id);
+    expect((await command('run.claim', { id, machineId: M1 })).body).toMatchObject({
+      state: 'running',
+      claimedBy: M1,
+    });
+    const second = await command('run.claim', { id, machineId: 'mch_other' });
+    expect(second.status).toBe(409);
+    expect(second.body).toMatchObject({ error: { code: 'conflict' } });
+  });
+});
+
+describe('RunLog writer socket', () => {
+  it('rejects a writer that is not the claiming machine (403)', async () => {
+    const { id } = await claimedRun();
+    const res = await openWs(`/v1/runs/${id}/events`, { 'x-sf-machine': 'mch_intruder' });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: { code: 'forbidden' } });
+  });
+
+  it('appends batched agent events, acks, fans out to viewers, and replays', async () => {
+    const { id } = await claimedRun(); // seqs 1-3: run.started, run.claimed, run.state
+    const viewerRes = await openWs(`/v1/runs/${id}/events?since=3`);
+    const viewer = frames(viewerRes.webSocket!);
+    const writerRes = await openWs(`/v1/runs/${id}/events?since=3`, { 'x-sf-machine': M1 });
+    expect(writerRes.status).toBe(101);
+    const writer = frames(writerRes.webSocket!);
+
+    writerRes.webSocket!.send(
+      JSON.stringify({ type: 'append', events: [agentMsg('one', 'k1'), agentMsg('two')] }),
+    );
+    expect(await writer.next((f) => f.type === 'ack')).toEqual({ type: 'ack', seqs: [4, 5] });
+    await viewer.next((f) => f.seq === 5);
+    expect(viewer.got.map((f) => f.seq)).toEqual([4, 5]);
+    // the writer does not get its own events echoed back
+    expect(writer.got.filter((f) => typeof f.seq === 'number')).toEqual([]);
+
+    // resend of key k1 is deduped
+    writerRes.webSocket!.send(JSON.stringify({ type: 'append', events: [agentMsg('one', 'k1')] }));
+    expect(
+      await writer.next((f) => f.type === 'ack' && (f.seqs as number[])[0] === 4),
+    ).toBeTruthy();
+
+    // invalid frames / forged types get an error frame
+    writerRes.webSocket!.send(
+      JSON.stringify({ type: 'append', events: [{ type: 'user.message', payload: {} }] }),
+    );
+    await writer.next((f) => f.type === 'error' && f.code === 'invalid_input');
+    // viewers are read-only
+    viewerRes.webSocket!.send(JSON.stringify({ type: 'append', events: [agentMsg('x')] }));
+    await viewer.next((f) => f.type === 'error' && f.code === 'forbidden');
+
+    // replay on reconnect
+    const again = await openWs(`/v1/runs/${id}/events?since=3`);
+    const replay = frames(again.webSocket!);
+    await replay.next((f) => f.seq === 5);
+    expect(replay.got.map((f) => [f.seq, f.type])).toEqual([
+      [4, 'agent'],
+      [5, 'agent'],
+    ]);
+    for (const ws of [viewerRes, writerRes, again]) ws.webSocket!.close();
+  });
+
+  it('delivers follow-ups and cancel requests to the daemon socket', async () => {
+    const { id } = await claimedRun();
+    const writerRes = await openWs(`/v1/runs/${id}/events?since=3`, { 'x-sf-machine': M1 });
+    const writer = frames(writerRes.webSocket!);
+    const sent = await command('run.message', { id, text: 'also add tests' });
+    expect(sent.status).toBe(200);
+    const msg = await writer.next((f) => f.type === 'user.message');
+    expect(msg).toMatchObject({
+      seq: 4,
+      payload: { text: 'also add tests', author: { userId: 'dev' } },
+    });
+    expect((await command('run.cancel', { id })).body).toMatchObject({ state: 'running' });
+    await writer.next((f) => f.type === 'run.cancel_requested');
+    writerRes.webSocket!.close();
+  });
+});
+
+describe('HTTP event endpoints', () => {
+  it('POST /v1/runs/:id/events appends a batch (run.append) and GET lists as JSON', async () => {
+    const { id } = await claimedRun();
+    const post = (machineId: string) =>
+      exports.default.fetch(`${LOCAL}/v1/runs/${id}/events`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ machineId, events: [agentMsg('a'), agentMsg('b')] }),
+      });
+    const ok = await post(M1);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ seqs: [4, 5] });
+    expect((await post('mch_nope')).status).toBe(403);
+
+    const list = await exports.default.fetch(`${LOCAL}/v1/runs/${id}/events?since=3`);
+    expect(await list.json()).toMatchObject({
+      events: [
+        { seq: 4, type: 'agent' },
+        { seq: 5, type: 'agent' },
+      ],
+    });
+    const viaCommand = await command('run.events', { id, since: 4 });
+    expect(viaCommand.body).toMatchObject({ events: [{ seq: 5 }] });
+  });
+});
+
+describe('ProjectRoom', () => {
+  it('broadcasts run.queued on run.start and state changes to subscribed daemons', async () => {
+    const project = await command('project.create', { name: 'Room' });
+    const projectId = String(project.body.id);
+    const task = await command('task.create', { projectId, title: 'T' });
+    const res = await openWs(`/v1/projects/${projectId}/room`, { 'x-sf-machine': M1 });
+    expect(res.status).toBe(101);
+    const room = frames(res.webSocket!);
+    expect(await env.PROJECT_ROOM.getByName(projectId).connections()).toEqual({
+      viewer: 0,
+      daemon: 1,
+    });
+
+    const run = await command('run.start', { taskId: task.body.id, agent: 'codex', prompt: 'go' });
+    const queued = await room.next((f) => f.type === 'run.queued');
+    expect(queued).toMatchObject({ run: { id: run.body.id, prompt: 'go', state: 'queued' } });
+
+    await command('run.claim', { id: run.body.id, machineId: M1 });
+    expect(await room.next((f) => f.type === 'run.state')).toMatchObject({
+      from: 'queued',
+      to: 'running',
+      run: { claimedBy: M1 },
+    });
+    res.webSocket!.close();
   });
 });

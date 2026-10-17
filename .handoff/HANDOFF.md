@@ -251,3 +251,54 @@ GUI" p95 against the 250 ms budget and record it in `perf-budget.json`.
 - Claude: streaming input (async-iterable prompt) gives mid-run follow-ups, `interrupt()`, `abortController`, `resume: sessionId`. Codex: each turn = new `codex exec --experimental-json [resume id]` process; no mid-turn steering — follow-up = next `runStreamed` on the same Thread; cancel via `TurnOptions.signal`.
 - D1: `db.update(runs).set(...).where(and(eq(id), eq(state,'queued'))).returning()` VERIFIED atomic-claim semantics on drizzle 0.45.4 (libsql). Schema lacks `failed` state and claim/session/pr columns; adding them must not trigger a table rebuild.
 - DO: use `acceptWebSocket(ws, [role])` tags + `serializeAttachment` (≤16 KiB) for per-socket identity, `getWebSockets('daemon')` to relay control frames, `setWebSocketAutoResponse` for ping/pong. Diff incl. untracked via a temp `GIT_INDEX_FILE` (no index side effects); push before `GH_PROMPT_DISABLED=1 gh pr create --draft --head --base --title --body-file -` (URL on stdout).
+
+### Stage 8: run lifecycle + events backend (2026-10-17)
+
+**Where things live**
+- `packages/contract/src/events.ts`: `AgentEvent` (research §3: `session.started | message | reasoning | tool.call | tool.result(+truncated) | file.change | todo | turn.completed | error`, `AgentUsage.costUsd` = per-turn delta), `runEventPayloads` (type → payload schema), typed `RunEvent` union, loose `StoredRunEvent` (`{seq, type, payload, at, emittedAt?}`, what RunLog returns), `parseRunEvent(raw) → RunEvent | null` (null for Phase 0 rows / unknown types), `DaemonEventInput`/`DaemonEventBatch` (≤500), WS frames `RunLogClientFrame`/`RunLogServerFrame`, `ProjectNotice`. Caps: `TOOL_OUTPUT_MAX` 16 KiB, `DIFF_PATCH_MAX` 1 MiB.
+- `packages/contract/src/lifecycle.ts`: `runTransitions`, `transitionActor`, `TERMINAL_RUN_STATES` (merged, abandoned), `ENDED_RUN_STATES`.
+- RunEvent types (envelope `{seq, type, payload, at, emittedAt?}`):
+  `run.started` (Run) · `run.claimed` ({machineId, run}) · `run.state` ({from, to, run}) · `agent` (AgentEvent; ONE type, the AgentEvent's own `type` discriminates) · `diff.snapshot` ({turn, base, patch, stats:{files, additions, deletions}, truncated?}) · `user.message` ({id: msg_…, text, author:{userId}}) · `run.cancel_requested` ({by}) · `pr.opened` ({url, run}). Only `agent` and `diff.snapshot` can be written by a daemon; the rest are written by core.
+- Run schema now: `+ failed` state, `prompt` (required non-empty trimmed on `run.start`; legacy rows `''`), `openPr` (default true), `claimedBy`, `claimedAt`, `sessionId`, `prUrl`, `costUsd` (cumulative), `endedAt` — all nullable. Errors: `+ forbidden` (403), `conflict` (409).
+- Core: `src/run-lifecycle.ts` (handlers + `authorizeWriter`), `src/rows.ts` (`toRun`), `src/memory-events.ts` (`createMemoryEvents()`: in-memory EventsPort with RunLog semantics — use it in daemon tests). `EventsPort` is now `{ append(runId, events[]) → StoredRunEvent[]; list(runId, since, limit); notifyProject(projectId, notice) }` (was `appendRunEvent`).
+- DB: `0003_run_lifecycle.sql` = 8 plain `ALTER TABLE runs ADD` (drizzle generated no rebuild; `DEFAULT true` hand-changed to `1`). Verified on local state: 11 tasks/11 runs survived. Old RunLog DOs get `emitted_at`/`key` columns added in place (constructor checks `pragma_table_info`; verified live on a Phase 0 run).
+
+**Commands** (all `POST /v1/commands/<name>`; REST paths are metadata except where noted)
+| command | input | output | notes |
+|---|---|---|---|
+| `run.start` | {taskId, agent, location='local', **prompt**, openPr=true} | Run | appends `run.started`; local runs → ProjectRoom `run.queued` |
+| `run.claim` | {id, machineId} | Run | owner only; `UPDATE … WHERE id AND state='queued' AND location='local' RETURNING`; loser → 409; same machine re-claim of its running run is idempotent; cloud → 409. Emits `run.claimed` + `run.state`, notice `run.state` |
+| `run.update` | {id, machineId?, state?, sessionId?, costUsd?, prUrl?, endedAt?} | Run | owner only; a given machineId must equal claimedBy (else 403); sessionId/costUsd/prUrl/endedAt need the claimer; transition must be in the table (else 409) and `claimer` transitions need the claimer (else 403). Optimistic `WHERE state=<from>` (409 on race). Entering review/failed/abandoned/merged stamps endedAt; → running clears it. Emits `run.state` (+ notice) and `pr.opened` when prUrl changes |
+| `run.message` | {id, text} | {event: StoredRunEvent} | owner only, any surface; 409 on terminal; appends `user.message`, notice `run.message` |
+| `run.cancel` | {id} | Run | owner only; `running` → appends `run.cancel_requested` (+ notice), state unchanged, **daemon finalizes** with `run.update state=abandoned`; any other live state → abandoned immediately; terminal → 409 |
+| `run.events` | {id, since=0, limit=500 (≤1000)} | {events: StoredRunEvent[]} | any signed-in user. Also `GET /v1/runs/:id/events?since=&limit=` without an upgrade header |
+| `run.append` | {id, machineId, events: DaemonEventInput[1..500]} | {seqs} | HTTP fallback, also served at **`POST /v1/runs/:id/events`** (body `{machineId, events}`; machineId may come from `x-sf-machine`). Claimer of the owner only, run not terminal |
+
+Authorization decision: reads open to any signed-in user (no project ACLs yet); every mutation of an existing run is owner-only (`ctx.userId === run.startedBy`); daemon effects also need `machineId === run.claimedBy`. Machine ids are self-chosen by the daemon (`MachineId` = `[\w.:-]{1,128}`, no registry, no `machine.*` commands) — they separate one owner's machines, the owner check is the security boundary. Stage 10: generate `mch_<uuid>` once and keep it in the CLI config.
+
+**Transition table** (`runTransitions`; `claimer` = owner's claiming daemon, `owner` = owner from any surface; claimer can do owner ones too; `queued → running` only via `run.claim`)
+- queued → abandoned (owner)
+- running → blocked | review | failed (claimer), abandoned (owner — escape hatch for a dead daemon)
+- blocked → running | failed (claimer), abandoned (owner)
+- review → running (claimer, follow-up resumes), merged | abandoned (owner)
+- failed → running (claimer), abandoned (owner)
+- checks, final_review: no transitions yet (Phase 4); merged, abandoned: terminal
+
+**WS protocol for the daemon**
+- Auth = same as CLI: `Authorization: Bearer <token>` (or loopback dev bypass), **no Origin header** (cookies are stripped when Origin is absent; CSWSH guard unchanged). The Worker strips every client `x-sf-*` header and sets `x-sf-role`/`x-sf-user`/`x-sf-machine` for the DO.
+- Project room: `GET /v1/projects/:projectId/room` + header `x-sf-machine: <id>` (→ tagged `daemon`; without it `viewer`). Server → client only: `ProjectNotice` JSON frames `{type:'run.queued', run}`, `{type:'run.state', from, to, run}`, `{type:'run.message', runId, message}`, `{type:'run.cancel_requested', runId, by}`. Broadcast goes to every socket in the room; the daemon filters (`run.location==='local' && run.startedBy===me`) then calls `run.claim`. No replay: on (re)connect, the daemon must catch up with `run.list` and claim queued local runs itself.
+- Run log writer: `GET /v1/runs/:runId/events?since=<lastSeq>` + `x-sf-machine: <id>` (must be the claimer, else **403 JSON before upgrade**; no machine header = viewer). Server → client: every `StoredRunEvent` (replay seq > since, then live) — the daemon sees `user.message` and `run.cancel_requested` here (and `run.state` etc.); the writer's OWN appended frames are not echoed back to it (but events it appends via HTTP fallback are). Client → server: `{"type":"append","events":[{type:'agent'|'diff.snapshot', payload, emittedAt?, key?}, …]}` → reply `{"type":"ack","seqs":[…]}` in input order, or `{"type":"error","code":"invalid_input"|"forbidden","message"}`. A repeated `key` returns the original seq and is not re-broadcast (use `<machineId>:<counter>` and resend unacked frames after reconnect). Text `ping` → `pong` via `setWebSocketAutoResponse` on both DOs (no wake).
+- RunLog RPC: `append(event)`, `appendMany(events)`, `list(since=0, limit=-1)`, `connections()`; ProjectRoom RPC: `broadcast(notice, role?)`, `connections()`.
+
+**Web/CLI/gate changes**: Start run dialog has a required Prompt textarea; `sf run start … --prompt <text>` (required); `cli.runStart(task, agent, location, prompt)` → `sf run start --task T --agent A --location L --prompt P`; `sf run get` shows prompt/machine/pr; `failed` badge; `applyRunEvent`/`sf watch` read the run from `payload.run` too. `scripts/gate.sh` passes `--prompt` and now also asserts `run.claim` twice → 200 then 409. `apps/api/scripts/smoke.sh` sends a prompt.
+
+**Tests**: contract 9, core 26 (incl. claim race via `Promise.allSettled`, full from×to transition matrix, legacy row defaults), api 19 (claim 409, writer 403, WS append+ack+fanout+no-echo+dedupe+replay, viewer read-only, follow-up + cancel on the daemon socket, HTTP batch + JSON list, ProjectRoom `run.queued`/`run.state` on start/claim), cli 22, web 5. `pnpm check && pnpm typecheck && pnpm test && pnpm build && pnpm gate` pass.
+
+**Gotchas for stages 9–11**
+- Writer authorization is checked at WS connect only. A writer socket stays writable after the run goes terminal (HTTP `run.append` re-checks every time). Fine for one daemon per machine. Close the socket when the run ends.
+- `run.cancel` on `running` does NOT change state; stage 10 must stop the agent then `run.update {state:'abandoned', machineId}`. Owner can force-abandon a running run with `run.update` (no machineId); the daemon should treat a `run.state → abandoned` notice/event as cancel.
+- Follow-ups on a `review`/`failed` run: the daemon learns via the ProjectRoom `run.message` notice (it may have closed the run's socket); it should `run.update state=running` (clears endedAt) before resuming the session.
+- `costUsd` on Run is cumulative (set by the daemon); `AgentUsage.costUsd` in `turn.completed` is the per-turn delta.
+- Web (stage 11): use `parseRunEvent` for typed rendering; Phase 0 `run.started` payloads lack the new Run fields and parse to null — render them raw. The ProjectRoom is also usable by the GUI (viewer) for live "Needs you".
+- Local dev caveat still applies: DO sockets are per process; point daemon + browser at the same server (5173).
+- `run.events` REST GET shares its path with the WS upgrade route; the upgrade header decides.

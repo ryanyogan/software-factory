@@ -20,8 +20,8 @@ describe('cli', () => {
     expect(cli.taskCreate('prj_1', 'Add login')).toBe(
       `sf task create --project prj_1 --title 'Add login'`,
     );
-    expect(cli.runStart('tsk_1', 'claude-code', 'local')).toBe(
-      'sf run start --task tsk_1 --agent claude-code --location local',
+    expect(cli.runStart('tsk_1', 'claude-code', 'local', `Add a 'login' page`)).toBe(
+      `sf run start --task tsk_1 --agent claude-code --location local --prompt 'Add a '\\''login'\\'' page'`,
     );
     expect(cli.runList()).toBe('sf run list');
     expect(cli.runGet('run_1')).toBe('sf run get run_1');

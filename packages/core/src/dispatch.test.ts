@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from 'vite-plus/test';
 import type { Ctx } from './context';
 import { dispatch } from './dispatch';
 import { slugify } from './handlers';
+import { createMemoryEvents } from './memory-events';
 
 const migrationsFolder = fileURLToPath(new URL('../../db/drizzle', import.meta.url));
 
@@ -47,22 +48,54 @@ describe('dispatch', () => {
 
   it('starts a run with defaults and reads it back', async () => {
     const { task } = await seedTask();
-    const run = await dispatch(ctx, 'run.start', { taskId: task.id, agent: 'claude-code' });
-    expect(run).toMatchObject({ state: 'queued', location: 'local', startedBy: 'user_1' });
+    const run = await dispatch(ctx, 'run.start', {
+      taskId: task.id,
+      agent: 'claude-code',
+      prompt: ' Add a login page ',
+    });
+    expect(run).toMatchObject({
+      state: 'queued',
+      location: 'local',
+      startedBy: 'user_1',
+      prompt: 'Add a login page',
+      openPr: true,
+      claimedBy: null,
+      sessionId: null,
+      prUrl: null,
+      costUsd: null,
+      endedAt: null,
+    });
     expect(await dispatch(ctx, 'run.get', { id: run.id })).toEqual(run);
     expect((await dispatch(ctx, 'run.list', { taskId: task.id })).runs).toEqual([run]);
   });
 
-  it('appends run.started to the events port', async () => {
+  it('appends run.started and notifies the project room for local runs', async () => {
+    const { project, task } = await seedTask();
+    const events = createMemoryEvents(() => 1);
+    ctx.events = events;
+    const run = await dispatch(ctx, 'run.start', { taskId: task.id, agent: 'codex', prompt: 'x' });
+    expect(events.runs.get(run.id)).toEqual([{ seq: 1, type: 'run.started', payload: run, at: 1 }]);
+    expect(events.notices).toEqual([
+      { projectId: project.id, notice: { type: 'run.queued', run } },
+    ]);
+
+    const cloud = await dispatch(ctx, 'run.start', {
+      taskId: task.id,
+      agent: 'codex',
+      prompt: 'x',
+      location: 'cloud',
+    });
+    expect(events.runs.get(cloud.id)).toHaveLength(1);
+    expect(events.notices).toHaveLength(1);
+  });
+
+  it('requires a non-empty prompt for new runs', async () => {
     const { task } = await seedTask();
-    const appended: [string, unknown][] = [];
-    ctx.events = {
-      appendRunEvent: async (runId, event) => {
-        appended.push([runId, event]);
-      },
-    };
-    const run = await dispatch(ctx, 'run.start', { taskId: task.id, agent: 'codex' });
-    expect(appended).toEqual([[run.id, { type: 'run.started', payload: run }]]);
+    for (const prompt of [undefined, '', '   ']) {
+      await expect(
+        dispatch(ctx, 'run.start', { taskId: task.id, agent: 'codex', prompt }),
+      ).rejects.toMatchObject({ code: 'invalid_input' });
+    }
   });
 
   it('creates a project without a repo', async () => {
@@ -83,7 +116,7 @@ describe('dispatch', () => {
     await expect(dispatch(ctx, 'nope.nope', {})).rejects.toMatchObject({ code: 'unknown_command' });
     await expect(dispatch(ctx, 'run.get', { id: 'missing' })).rejects.toBeInstanceOf(CommandError);
     await expect(
-      dispatch(ctx, 'run.start', { taskId: 'missing', agent: 'codex' }),
+      dispatch(ctx, 'run.start', { taskId: 'missing', agent: 'codex', prompt: 'x' }),
     ).rejects.toMatchObject({ code: 'not_found', status: 404 });
   });
 });

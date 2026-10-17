@@ -15,11 +15,17 @@ export const inputs = {
   taskList: (a: { project?: string }): CommandInput<'task.list'> => ({
     projectId: opt(a.project),
   }),
-  runStart: (a: { task: string; agent: string; location?: string }): CommandInput<'run.start'> =>
+  runStart: (a: {
+    task: string;
+    agent: string;
+    location?: string;
+    prompt: string;
+  }): CommandInput<'run.start'> =>
     ({
       taskId: a.task,
       agent: a.agent,
       location: opt(a.location),
+      prompt: a.prompt,
     }) as CommandInput<'run.start'>,
   runList: (a: { task?: string }): CommandInput<'run.list'> => ({ taskId: opt(a.task) }),
   runGet: (a: { id: string }): CommandInput<'run.get'> => ({ id: a.id }),

@@ -22,6 +22,13 @@
       "when": 1792254425035,
       "tag": "0002_nullable_repo_url",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792276665523,
+      "tag": "0003_run_lifecycle",
+      "breakpoints": true
     }
   ]
 }

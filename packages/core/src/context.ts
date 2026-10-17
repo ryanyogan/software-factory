@@ -1,3 +1,4 @@
+import type { ProjectNotice, StoredRunEvent } from '@sf/contract';
 import type { schema } from '@sf/db';
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core';
 
@@ -7,15 +8,23 @@ import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core';
  */
 export type Db = BaseSQLiteDatabase<'async', unknown, typeof schema>;
 
-/** An event appended to a run's append-only log (RunLog Durable Object in the api). */
-export interface RunEvent {
+/** An event to append to a run's append-only log (RunLog Durable Object in the api). */
+export interface RunEventInput {
   type: string;
   payload: unknown;
+  /** ms, stamped by the sender (daemon) for latency measurement. */
+  emittedAt?: number;
+  /** Idempotency key: appending a key that already exists returns the original event. */
+  key?: string;
 }
 
-/** Optional platform port for run events, so core stays free of Cloudflare APIs. */
+/** Platform port for run events + project fan-out, so core stays free of Cloudflare APIs. */
 export interface EventsPort {
-  appendRunEvent(runId: string, event: RunEvent): Promise<void>;
+  /** Append in order; returns the stored events (deduped keys return the original). */
+  append(runId: string, events: RunEventInput[]): Promise<StoredRunEvent[]>;
+  list(runId: string, since: number, limit: number): Promise<StoredRunEvent[]>;
+  /** Broadcast to everyone subscribed to the project's room (daemons, GUIs). */
+  notifyProject(projectId: string, notice: ProjectNotice): Promise<void>;
 }
 
 export interface Ctx {
@@ -25,6 +34,9 @@ export interface Ctx {
   /** Injectable clock/ids for deterministic tests. */
   now?: () => Date;
   newId?: (prefix: string) => string;
-  /** Where run events go. Omitted in tests / surfaces without a log. */
+  /**
+   * Where run events go. Commands that write events tolerate its absence (they just skip it);
+   * `run.events` / `run.message` / `run.append` fail with `internal` without one.
+   */
   events?: EventsPort;
 }

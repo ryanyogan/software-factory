@@ -15,10 +15,11 @@ export function eventsUrl(apiUrl: string, runId: string, since = 0): string {
 
 const TERMINAL = new Set(['merged', 'abandoned']);
 
+/** The run state carried by an event: a Run payload, or `{ run }` (run.state / run.claimed / pr.opened). */
 function runState(payload: unknown): string | undefined {
-  return payload && typeof payload === 'object' && 'state' in payload
-    ? String(payload.state)
-    : undefined;
+  if (!payload || typeof payload !== 'object') return undefined;
+  if ('run' in payload) return runState(payload.run);
+  return 'state' in payload ? String(payload.state) : undefined;
 }
 
 export function isTerminalEvent(e: RunEventMessage): boolean {

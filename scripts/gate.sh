@@ -50,12 +50,18 @@ PROJECT_ID="$("${SF[@]}" project create --name "gate-$STAMP" --repo "https://git
 say "CLI: task create ($PROJECT_ID)"
 TASK_ID="$("${SF[@]}" task create --project "$PROJECT_ID" --title "Gate task $STAMP" --json | json id)" || fail "task create"
 say "CLI: run start ($TASK_ID)"
-RUN_JSON="$("${SF[@]}" run start --task "$TASK_ID" --agent claude-code --location local --json)"
+RUN_JSON="$("${SF[@]}" run start --task "$TASK_ID" --agent claude-code --location local --prompt "Gate prompt $STAMP" --json)"
 RUN_ID="$(json id <<<"$RUN_JSON")" || fail "run start: $RUN_JSON"
 [[ "$(json state <<<"$RUN_JSON")" == "queued" ]] || fail "run not queued: $RUN_JSON"
 
 say "CLI: run list --task $TASK_ID"
 "${SF[@]}" run list --task "$TASK_ID" --json | grep -q "\"$RUN_ID\"" || fail "CLI run list missing $RUN_ID"
+
+say "API: run.claim twice (second must be 409 conflict)"
+claim() { curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' \
+  --data "{\"id\":\"$RUN_ID\",\"machineId\":\"$1\"}" "$BASE/v1/commands/run.claim"; }
+[[ "$(claim mch_gate_a)" == "200" ]] || fail "first run.claim did not succeed"
+[[ "$(claim mch_gate_b)" == "409" ]] || fail "second run.claim was not a 409 conflict"
 
 say "GUI: GET $BASE/tasks/$TASK_ID (SSR → server fn → ApiRpc)"
 HTML="$(curl -sf "$BASE/tasks/$TASK_ID")" || fail "task page request failed"

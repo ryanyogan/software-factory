@@ -4,6 +4,8 @@ export type ErrorCode =
   | 'invalid_output'
   | 'not_found'
   | 'unauthorized'
+  | 'forbidden'
+  | 'conflict'
   | 'internal';
 
 export interface ErrorBody {
@@ -16,6 +18,8 @@ const statusByCode: Record<ErrorCode, number> = {
   invalid_output: 500,
   not_found: 404,
   unauthorized: 401,
+  forbidden: 403,
+  conflict: 409,
   internal: 500,
 };
 

@@ -25,7 +25,9 @@ export function applyRunEvent(qc: QueryClient, runId: string, event: RunEvent) {
   qc.setQueryData<RunEvent[]>(keys.events(runId), (prev = []) =>
     prev.some((e) => e.seq === event.seq) ? prev : [...prev, event].sort((a, b) => a.seq - b.seq),
   );
-  const run = Run.safeParse(event.payload);
+  // run.started carries a Run; run.state / run.claimed / pr.opened carry `{ run }`.
+  const p = event.payload;
+  const run = Run.safeParse(p && typeof p === 'object' && 'run' in p ? p.run : p);
   if (run.success && run.data.id === runId) {
     qc.setQueryData(keys.run(runId), run.data);
     void qc.invalidateQueries({ queryKey: ['run.list'] });

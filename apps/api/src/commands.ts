@@ -1,5 +1,5 @@
 import { CommandError, type ErrorBody } from '@sf/contract';
-import { type Ctx, dispatch } from '@sf/core';
+import { type Ctx, dispatch, type EventsPort } from '@sf/core';
 import { createD1Db } from '@sf/db';
 import { type AuthInput, resolveUserId } from './session';
 
@@ -7,19 +7,22 @@ export type CommandResult =
   | { ok: true; data: unknown }
   | { ok: false; status: number; error: ErrorBody['error'] };
 
-function ctxFor(env: Env, userId: string): Ctx {
+/** Core's EventsPort backed by the RunLog (per run) and ProjectRoom (per project) DOs. */
+export function eventsPort(env: Env): EventsPort {
   return {
-    db: createD1Db(env.DB),
-    userId,
-    events: {
-      async appendRunEvent(runId, event) {
-        await env.RUN_LOG.getByName(runId).append(event);
-      },
+    append: (runId, events) => env.RUN_LOG.getByName(runId).appendMany(events),
+    list: (runId, since, limit) => env.RUN_LOG.getByName(runId).list(since, limit),
+    async notifyProject(projectId, notice) {
+      await env.PROJECT_ROOM.getByName(projectId).broadcast(notice);
     },
   };
 }
 
-function fail(err: CommandError): CommandResult {
+export function ctxFor(env: Env, userId: string): Ctx {
+  return { db: createD1Db(env.DB), userId, events: eventsPort(env) };
+}
+
+export function fail(err: CommandError): CommandResult {
   return { ok: false, status: err.status, error: err.toBody().error };
 }
 

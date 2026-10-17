@@ -10,6 +10,7 @@ const variant: Record<RunState, 'default' | 'secondary' | 'destructive' | 'outli
   final_review: 'default',
   merged: 'outline',
   abandoned: 'outline',
+  failed: 'destructive',
 };
 
 export function StateBadge({ state }: { state: RunState }) {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { defineCommand } from './define';
-import { Agent, Id, Project, Run, RunLocation, Task } from './schemas';
+import { DaemonEventBatch, StoredRunEvent, UserMessage } from './events';
+import { Agent, Id, MachineId, Project, Prompt, Run, RunLocation, RunState, Task } from './schemas';
 
 export const projectCreate = defineCommand({
   name: 'project.create',
@@ -45,6 +46,9 @@ export const runStart = defineCommand({
     taskId: Id,
     agent: Agent,
     location: RunLocation.default('local'),
+    /** Required for new runs (legacy rows carry `''`). */
+    prompt: Prompt.trim().min(1),
+    openPr: z.boolean().default(true),
   }),
   output: Run,
   http: { method: 'POST', path: '/v1/runs' },
@@ -66,6 +70,72 @@ export const runList = defineCommand({
   http: { method: 'GET', path: '/v1/runs' },
 });
 
+export const runClaim = defineCommand({
+  name: 'run.claim',
+  summary:
+    'Atomically claim a queued local run for a daemon (queued → running). Owner only; 409 if already taken.',
+  input: z.object({ id: Id, machineId: MachineId }),
+  output: Run,
+  http: { method: 'POST', path: '/v1/runs/:id/claim' },
+});
+
+export const runUpdate = defineCommand({
+  name: 'run.update',
+  summary:
+    'Transition a run (see runTransitions) and/or record sessionId, costUsd, prUrl, endedAt. Owner only; daemon fields need the claimer machineId.',
+  input: z.object({
+    id: Id,
+    /** The calling daemon. Required for `claimer` transitions and for sessionId/costUsd/prUrl. */
+    machineId: MachineId.optional(),
+    state: RunState.optional(),
+    sessionId: Run.shape.sessionId.unwrap().optional(),
+    costUsd: Run.shape.costUsd.unwrap().optional(),
+    prUrl: Run.shape.prUrl.unwrap().optional(),
+    /** Defaults to now when entering review/failed/abandoned/merged. */
+    endedAt: Run.shape.endedAt.unwrap().optional(),
+  }),
+  output: Run,
+  http: { method: 'PATCH', path: '/v1/runs/:id' },
+});
+
+export const runMessage = defineCommand({
+  name: 'run.message',
+  summary: 'Send a follow-up (steer) message to the agent of a run. Owner only, any surface.',
+  input: z.object({ id: Id, text: UserMessage.shape.text }),
+  output: z.object({ event: StoredRunEvent }),
+  http: { method: 'POST', path: '/v1/runs/:id/messages' },
+});
+
+export const runCancel = defineCommand({
+  name: 'run.cancel',
+  summary:
+    'Cancel a run. Unclaimed/idle runs (queued, review, failed, blocked) become abandoned now; running runs get run.cancel_requested and the daemon finalizes.',
+  input: z.object({ id: Id }),
+  output: Run,
+  http: { method: 'POST', path: '/v1/runs/:id/cancel' },
+});
+
+export const runEvents = defineCommand({
+  name: 'run.events',
+  summary: 'List a run’s events with seq > since (read without a WebSocket).',
+  input: z.object({
+    id: Id,
+    since: z.number().int().nonnegative().default(0),
+    limit: z.number().int().positive().max(1000).default(500),
+  }),
+  output: z.object({ events: z.array(StoredRunEvent) }),
+  http: { method: 'GET', path: '/v1/runs/:id/events' },
+});
+
+export const runAppend = defineCommand({
+  name: 'run.append',
+  summary:
+    'HTTP fallback for the daemon WebSocket: append agent/diff events. Only the claimer machine of the owner.',
+  input: z.object({ id: Id, machineId: MachineId, events: DaemonEventBatch }),
+  output: z.object({ seqs: z.array(z.number().int()) }),
+  http: { method: 'POST', path: '/v1/runs/:id/events' },
+});
+
 export const commands = {
   'project.create': projectCreate,
   'project.list': projectList,
@@ -74,6 +144,12 @@ export const commands = {
   'run.start': runStart,
   'run.get': runGet,
   'run.list': runList,
+  'run.claim': runClaim,
+  'run.update': runUpdate,
+  'run.message': runMessage,
+  'run.cancel': runCancel,
+  'run.events': runEvents,
+  'run.append': runAppend,
 } as const;
 
 export type Commands = typeof commands;
