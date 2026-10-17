@@ -59,5 +59,28 @@ export function useStartRun() {
   });
 }
 
-/** Run states that need a human (Phase 0 "Needs you"). */
-export const NEEDS_YOU: ReadonlySet<Run['state']> = new Set(['queued', 'blocked', 'review']);
+export function useCancelRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => callCommand('run.cancel', { id }),
+    onSuccess: (run: Run) => {
+      qc.setQueryData(keys.run(run.id), run);
+      return qc.invalidateQueries({ queryKey: ['run.list'] });
+    },
+  });
+}
+
+/** Follow-up for the run's agent. The caller merges the returned event (see `applyRunEvent`). */
+export function useSendMessage() {
+  return useMutation({
+    mutationFn: (input: CommandInput<'run.message'>) => callCommand('run.message', input),
+  });
+}
+
+/** Run states that need a human ("Needs you"): review, failed, blocked, and queued (not picked up). */
+export const NEEDS_YOU: ReadonlySet<Run['state']> = new Set([
+  'review',
+  'failed',
+  'blocked',
+  'queued',
+]);

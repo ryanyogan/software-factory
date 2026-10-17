@@ -27,3 +27,24 @@ describe('cli', () => {
     expect(cli.runGet('run_1')).toBe('sf run get run_1');
   });
 });
+
+describe('cli (stage 11 run actions)', () => {
+  it('matches the sf run/watch/daemon flags in apps/cli', () => {
+    expect(cli.runStart('tsk_1', 'fake', 'local', 'go', false)).toBe(
+      'sf run start --task tsk_1 --agent fake --location local --prompt go --no-pr',
+    );
+    expect(cli.runStart('tsk_1', 'fake', 'local', 'go', true)).toBe(
+      'sf run start --task tsk_1 --agent fake --location local --prompt go',
+    );
+    expect(cli.runMessage('run_1', `also add a "README" & it's done`)).toBe(
+      `sf run message run_1 'also add a "README" & it'\\''s done'`,
+    );
+    expect(cli.runCancel('run_1')).toBe('sf run cancel run_1');
+    expect(cli.watch('run_1')).toBe('sf watch run_1');
+    expect(cli.open('run_1')).toBe('sf open run_1');
+    expect(cli.open()).toBe('sf open');
+    expect(cli.daemon()).toBe('sf daemon');
+    expect(cli.link()).toBe('sf link');
+    expect(cli.link('prj_1')).toBe('sf link --project prj_1');
+  });
+});

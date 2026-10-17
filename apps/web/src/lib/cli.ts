@@ -23,8 +23,16 @@ export const cli = {
   taskCreate: (projectId: string, title: string) =>
     sf('task create', { project: projectId, title }),
   taskList: (projectId: string) => sf('task list', { project: projectId }),
-  runStart: (taskId: string, agent: string, location: string, prompt: string) =>
-    sf('run start', { task: taskId, agent, location, prompt }),
+  runStart: (taskId: string, agent: string, location: string, prompt: string, openPr = true) =>
+    sf('run start', { task: taskId, agent, location, prompt }) + (openPr ? '' : ' --no-pr'),
   runList: (taskId?: string) => sf('run list', { task: taskId }),
   runGet: (id: string) => sf('run get', {}, [id]),
+  runMessage: (id: string, text: string) => sf('run message', {}, [id, text]),
+  runCancel: (id: string) => sf('run cancel', {}, [id]),
+  /** Follow a run's events in the terminal. */
+  watch: (id: string) => sf('watch', {}, [id]),
+  /** Open a run in the browser from a shell. */
+  open: (id?: string) => sf('open', {}, id ? [id] : []),
+  daemon: () => sf('daemon'),
+  link: (projectId?: string) => sf('link', { project: projectId }),
 };

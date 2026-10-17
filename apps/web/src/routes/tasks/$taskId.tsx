@@ -9,6 +9,7 @@ import { StartRunDialog } from '@/components/dialogs';
 import { PageHeader, TableSkeleton } from '@/components/page';
 import { RunsTable } from '@/components/runs-table';
 import { cli } from '@/lib/cli';
+import { useProjectRooms } from '@/lib/project-room';
 import { runsQuery, tasksQuery } from '@/lib/queries';
 
 export const Route = createFileRoute('/tasks/$taskId')({
@@ -23,6 +24,9 @@ function TaskPage() {
   // No task.get command yet: find the task in the (cached) full task list.
   const task = useQuery(tasksQuery()).data?.tasks.find((t) => t.id === taskId);
   const [open, setOpen] = useState(false);
+  // Live run states from the project room (no-op until the task list has loaded).
+  useProjectRooms(task ? [task.projectId] : []);
+  const runs = [...data.runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return (
     <>
       <PageHeader
@@ -38,7 +42,7 @@ function TaskPage() {
           </>
         }
       />
-      {data.runs.length === 0 ? (
+      {runs.length === 0 ? (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>No runs</EmptyTitle>
@@ -46,7 +50,7 @@ function TaskPage() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <RunsTable runs={data.runs} />
+        <RunsTable runs={runs} />
       )}
       <StartRunDialog open={open} onOpenChange={setOpen} taskId={taskId} />
     </>

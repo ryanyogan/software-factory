@@ -2,16 +2,12 @@ import { Run } from '@sf/contract';
 import { type QueryClient, queryOptions, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { keys } from './queries';
+import { type RawRunEvent, mergeEvents } from './transcript';
 
-/** Matches `StoredRunEvent` from sf-api's RunLog. */
-export interface RunEvent {
-  seq: number;
-  type: string;
-  payload: unknown;
-  at: number;
-}
+/** Matches `StoredRunEvent` from sf-api's RunLog (typed view: `parseRunEvent` / `buildTranscript`). */
+export type RunEvent = RawRunEvent;
 
-/** Events are fed only by the socket; the query is just the cache slot. */
+/** Events are fed only by the socket (replay `?since=` + live); the query is just the cache slot. */
 export const runEventsQuery = (runId: string) =>
   queryOptions<RunEvent[]>({
     queryKey: keys.events(runId),
@@ -20,23 +16,34 @@ export const runEventsQuery = (runId: string) =>
     gcTime: 5 * 60_000,
   });
 
-/** Merge an event into the cache (dedupe by seq) and patch the run when the payload is a Run. */
-export function applyRunEvent(qc: QueryClient, runId: string, event: RunEvent) {
-  qc.setQueryData<RunEvent[]>(keys.events(runId), (prev = []) =>
-    prev.some((e) => e.seq === event.seq) ? prev : [...prev, event].sort((a, b) => a.seq - b.seq),
-  );
-  // run.started carries a Run; run.state / run.claimed / pr.opened carry `{ run }`.
-  const p = event.payload;
-  const run = Run.safeParse(p && typeof p === 'object' && 'run' in p ? p.run : p);
-  if (run.success && run.data.id === runId) {
-    qc.setQueryData(keys.run(runId), run.data);
+/**
+ * Merge events into the cache and patch `run.get` from any payload that carries the Run
+ * (`run.started`, `run.claimed`, `run.state`, `pr.opened`). Also used for the event `run.message`
+ * returns, so a follow-up shows before the socket delivers it.
+ */
+export function applyRunEvents(qc: QueryClient, runId: string, events: readonly RunEvent[]) {
+  qc.setQueryData<RunEvent[]>(keys.events(runId), (prev = []) => mergeEvents(prev, events));
+  let latest: Run | undefined;
+  for (const event of events) {
+    const p = event.payload;
+    const run = Run.safeParse(p && typeof p === 'object' && 'run' in p ? p.run : p);
+    if (run.success && run.data.id === runId) latest = run.data;
+  }
+  if (latest) {
+    qc.setQueryData(keys.run(runId), latest);
     void qc.invalidateQueries({ queryKey: ['run.list'] });
   }
 }
 
+export const applyRunEvent = (qc: QueryClient, runId: string, event: RunEvent) =>
+  applyRunEvents(qc, runId, [event]);
+
 export type SocketStatus = 'connecting' | 'live' | 'closed';
 
-/** Tails `/v1/runs/:id/events` (proxied by web to the RunLog DO), resuming with `?since=`. */
+/**
+ * Tails `/v1/runs/:id/events` (proxied by web to the RunLog DO), resuming with `?since=<last seq>`.
+ * Frames are batched per animation frame so a replay of hundreds of events renders once.
+ */
 export function useRunEvents(runId: string): SocketStatus {
   const qc = useQueryClient();
   const [status, setStatus] = useState<SocketStatus>('connecting');
@@ -46,8 +53,18 @@ export function useRunEvents(runId: string): SocketStatus {
     let retry: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
     let attempt = 0;
+    let queue: RunEvent[] = [];
+    let frame: number | undefined;
+
+    const flush = () => {
+      frame = undefined;
+      const batch = queue;
+      queue = [];
+      if (batch.length) applyRunEvents(qc, runId, batch);
+    };
 
     const connect = () => {
+      flush();
       const events = qc.getQueryData<RunEvent[]>(keys.events(runId)) ?? [];
       const since = events.at(-1)?.seq ?? 0;
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -60,7 +77,10 @@ export function useRunEvents(runId: string): SocketStatus {
       ws.onmessage = (m) => {
         if (typeof m.data !== 'string' || m.data === 'pong') return;
         try {
-          applyRunEvent(qc, runId, JSON.parse(m.data) as RunEvent);
+          const e = JSON.parse(m.data) as RunEvent;
+          if (typeof e.seq !== 'number') return; // control frames
+          queue.push(e);
+          frame ??= requestAnimationFrame(flush);
         } catch {
           // ignore malformed frames
         }
@@ -75,9 +95,20 @@ export function useRunEvents(runId: string): SocketStatus {
     return () => {
       stopped = true;
       clearTimeout(retry);
-      ws?.close();
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      flush();
+      closeQuietly(ws);
     };
   }, [qc, runId]);
 
   return status;
+}
+
+/** Close without the browser's "closed before the connection is established" warning. */
+function closeQuietly(ws: WebSocket | undefined) {
+  if (!ws) return;
+  if (ws.readyState === WebSocket.CONNECTING) {
+    ws.onopen = () => ws.close();
+    ws.onmessage = null;
+  } else ws.close();
 }
