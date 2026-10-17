@@ -8,7 +8,9 @@
     "fmt": "vp fmt",
     "test": "vp run -r test",
     "build": "vp run -r build",
-    "typecheck": "vp run -r typecheck"
+    "typecheck": "vp run -r typecheck",
+    "db:migrate:local": "pnpm --filter @sf/api db:migrate:local",
+    "dev": "pnpm --filter @sf/web dev"
   },
   "devDependencies": {
     "@sf/config": "workspace:*",

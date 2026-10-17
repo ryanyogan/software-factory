@@ -1,0 +1,17 @@
+{
+  "extends": "@sf/config/tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [
+      "vite-plus/client",
+      "./worker-configuration.d.ts",
+      "../api/worker-configuration.d.ts"
+    ],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@sf/ui/*": ["../../packages/ui/src/*"]
+    }
+  },
+  "include": ["src", "vite.config.ts", "worker-configuration.d.ts"]
+}

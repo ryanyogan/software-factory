@@ -1,4 +1,9 @@
 {
   "extends": "@sf/config/tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "paths": { "@sf/ui/*": ["./src/*"] }
+  },
   "include": ["src"]
 }

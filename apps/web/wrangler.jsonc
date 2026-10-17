@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sf-web",
+  "main": "@tanstack/react-start/server-entry",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "traces": { "enabled": true } },
+  // Web talks to the api ONLY through this binding: RPC (`env.API.command`) for server functions,
+  // `env.API.fetch` for the `/v1/*` + `/api/auth/*` proxies.
+  "services": [{ "binding": "API", "service": "sf-api", "entrypoint": "ApiRpc" }],
+}

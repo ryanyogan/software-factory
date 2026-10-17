@@ -1,0 +1,40 @@
+{
+  "name": "@sf/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview",
+    "deploy": "vp build && wrangler deploy",
+    "cf-typegen": "wrangler types -c wrangler.jsonc -c ../api/wrangler.jsonc",
+    "typecheck": "pnpm cf-typegen >/dev/null && tsc --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@sf/contract": "workspace:*",
+    "@tanstack/react-query": "5.104.3",
+    "@tanstack/react-router": "1.170.45",
+    "@tanstack/react-router-ssr-query": "1.167.3",
+    "@tanstack/react-start": "1.169.3",
+    "better-auth": "1.7.10",
+    "lucide-react": "^1.58.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "sonner": "^2.0.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.64.0",
+    "@sf/api": "workspace:*",
+    "@sf/config": "workspace:*",
+    "@sf/ui": "workspace:*",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "wrangler": "4.151.1"
+  }
+}

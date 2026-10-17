@@ -123,3 +123,45 @@ RunLog RPC: `env.RUN_LOG.getByName(runId).append({type, payload})` → `StoredRu
 - Browser sign-in: the auth origin should be the web origin. Proxy `/api/auth/*` from web via `env.API.fetch(request)` and set `BETTER_AUTH_URL` to the web origin (http://localhost:5173) when running under web; GitHub callback = `<web origin>/api/auth/callback/github`. The device flow `verification_uri` = BETTER_AUTH_URL + `/device`, so web needs a `/device` page (approve/deny client API unverified).
 - The bearer path (`Authorization: Bearer <session token>` → `auth.api.getSession({ headers })`) is wired but was not exercised end to end (no GitHub app). The CLI stage should verify it after `sf login`.
 - `database_id` in wrangler.jsonc is a placeholder `00000000-...`; replace it after `wrangler d1 create sf` before any deploy. Nothing remote was created.
+
+### Stage 4: apps/web (`sf-web`) + packages/ui (2026-10-17)
+
+**What exists**
+- `apps/web` (`@sf/web`): TanStack Start 1.169.3 on Workers, hand-written (the `@tanstack/cli` scaffold was used as a reference only). `wrangler.jsonc`: main `@tanstack/react-start/server-entry`, nodejs_compat, 2026-10-01, observability + traces, service binding `API` → `sf-api` / `ApiRpc`. `vite.config.ts` (from `vite-plus`): cloudflare plugin (`viteEnvironment: ssr`, `auxiliaryWorkers: ../api/wrangler.jsonc`, `persistState` → `apps/api/.wrangler/state`), tailwind v4, tanstackStart, react. Plugins are skipped when `mode === 'test'` so unit tests run in plain Node.
+- `packages/ui` (`@sf/ui`): shadcn 4.22 monorepo layout, style `radix-nova` (Radix base, lucide, neutral), copied from `shadcn init -t start --monorepo --preset nova --base radix` minus Turborepo. Both `components.json` (packages/ui + apps/web) match. Imports are subpaths: `@sf/ui/components/<x>`, `@sf/ui/lib/utils`, `@sf/ui/hooks/use-mobile`, `@sf/ui/globals.css`. Add components with `pnpm dlx shadcn@4.22.0 add <name>` **from apps/web** (it writes into packages/ui). Gotcha: shadcn put `use-mobile.ts` into apps/web/src/hooks; it was moved to packages/ui/src/hooks (move any future hooks the same way). Components: button input label card table badge dialog select sonner sidebar(+sheet) command skeleton tooltip dropdown-menu field empty separator kbd input-group textarea.
+- Theme: one token set (shadcn neutral) in `packages/ui/src/styles/globals.css`, `.dark` class; `system` default + toggle (header button / cmd-k "Toggle theme"), stored in `localStorage.theme`, no-flash inline script (`apps/web/src/components/theme.tsx`).
+
+**Routes** (`apps/web/src/routes`)
+- `/`: "Needs you" (runs in queued/blocked/review, from `run.list`)
+- `/projects`: list + create dialog; `/projects/$projectId`: tasks + "New task"; `/tasks/$taskId`: runs + "Start run" (agent claude-code|codex|opencode, location local|cloud); `/runs/$runId`: state badge + live events table.
+- Server routes: `/v1/$` (ANY) → `env.API.fetch(request)`, which covers REST, `/v1/commands/:name`, and **WebSocket upgrades**. `/api/auth/$` (GET/POST) → `env.API.fetch`.
+- Every action shows a copy-as-CLI box (`src/lib/cli.ts`, POSIX single-quoting), e.g. `sf task create --project prj_… --title 'Add login page'`. cmd-k / ctrl-k palette: New project, go to Needs you / Projects / each project, toggle theme. `g h` / `g p` key chords. The header shows the viewer (`dev` via bypass) and a menu with "Sign in with GitHub" (`authClient.signIn.social`; needs OAuth creds, untested).
+
+**Data path (same as CLI)**: `src/lib/commands.ts` has ONE `createServerFn` POST `commandFn({ name, input })` → `rpcCommand` (`src/lib/api.server.ts`) → `env.API.command(name, input, { headers: [...request.headers], origin })` → api `runCommand`. `unwrap()` (`src/lib/result.ts`) validates output with the contract schema or rebuilds `CommandError`. `src/lib/queries.ts` has `queryOptions` per command (keys = command names), plus mutations that invalidate (`useCreateProject/useCreateTask/useStartRun`). Router: per-request QueryClient + `@tanstack/react-router-ssr-query`; loaders `ensureQueryData`, components `useSuspenseQuery`.
+Live events: `src/lib/run-events.ts`. The browser opens `ws(s)://<web origin>/v1/runs/:id/events?since=<lastSeq>` (proxied through web's `/v1/$` route; this works in dev), merges events into the `['run.events', id]` cache (deduped by seq), patches `['run.get', id]` when the payload is a Run, and reconnects with backoff.
+
+**api change (stage 3 code)**: a service binding to a *named entrypoint* sends `env.API.fetch()` to that entrypoint's `fetch`, so `ApiRpc` now has `fetch()` that delegates to the Hono app. The app moved to `apps/api/src/app.ts`; `index.ts` re-exports it as default. api tests still pass (7).
+
+**Dev / DB state (resolves stage 3's open question)**
+- `pnpm dev` (root) = `pnpm --filter @sf/web dev` = `vp dev` on **http://localhost:5173**, running sf-web + sf-api (auxiliary) in one Miniflare.
+- Local state: the vite plugin's `persistState` points at **`apps/api/.wrangler/state`**, the same dir `wrangler dev` in apps/api uses. So there is one local D1 + DO store and one migrate command: **`pnpm db:migrate:local`** (root → `pnpm --filter @sf/api db:migrate:local`). Verified: data created via `wrangler dev` (8787) is visible on 5173, even with both running at once. Caveat: DO live sockets are per process, so a WS opened on 5173 won't see events appended by the 8787 process. Use one server per flow.
+- Without `persistState` the aux worker's state would live in `apps/web/.wrangler/state` (the default). Migrations there would need `--persist-to ../web/.wrangler/state` (verified to work, but no longer used).
+- The aux worker reads its vars from **`apps/api/.dev.vars`** ("Using secrets defined in ../api/.dev.vars"). `vp build` copies it into `apps/web/dist/sf_api/.dev.vars` (dist is gitignored). `BETTER_AUTH_URL` is still http://localhost:8787. For GitHub sign-in via web, set it (and the GitHub callback) to http://localhost:5173.
+- Verified (headless chromium + playwright-core script; the Playwright MCP needs `/opt/google/chrome`, which isn't installed): create project → create task → start run (codex/local) → run page shows `run.started` over a live WS, cmd-k nav, dark toggle, no console errors. Screenshot: `.handoff/screens/run.png`.
+
+**Commands**: `pnpm --filter @sf/web dev|build|test|typecheck|cf-typegen`. `cf-typegen` = `wrangler types -c wrangler.jsonc -c ../api/wrangler.jsonc` → `API: Service<typeof import("../api/src/index").ApiRpc>`. `pnpm check|typecheck|test|build` all pass (1 lint warning from stock shadcn `use-mobile`).
+
+**Gotchas**
+- Use `vp dev` / `vp build` in app scripts: there is no `vite` bin (vite is aliased to vite-plus-core and not a direct dep). tsconfig `types` uses `vite-plus/client`, not `vite/client`.
+- Web's tsconfig also loads `../api/worker-configuration.d.ts`. web type-checks api source (pulled in by the typed binding), and that source needs the api's `Env`. The global `Env` interfaces merge, so web *code* sees api bindings in its types too. Only `env.API` exists at runtime in web.
+- Server-fn return types must be serialisable: the RPC result is typed as `Json` (`RpcResult` in api.server.ts) and round-tripped through JSON.
+- `routeTree.gen.ts` is regenerated by dev/build. It is committed but ignored by fmt/lint.
+- Dates render as UTC during SSR and switch to local after hydration (`<Time>` in components/page.tsx) to avoid hydration mismatches.
+- lucide-react 1.x has no brand icons (no `GithubIcon`).
+- Root lint: `typescript/await-thenable` is also off for `apps/web/**` (RPC stub false positive).
+
+**For stage 5 (CLI)**
+- Point the CLI at either `http://localhost:5173` (web dev; `/v1/*` is proxied, including WS) or `http://localhost:8787` (`pnpm --filter @sf/api dev`). Both hit the same `runCommand` and, locally, the same D1. `createClient({ baseUrl })` from `@sf/contract` works against both. Verified with curl `POST /v1/commands/project.list` on both.
+- The GUI's copy-as-CLI strings (`apps/web/src/lib/cli.ts`, tested in `cli.test.ts`) already assume the exact syntax: `sf project create --name X [--repo URL]`, `sf project list`, `sf task create --project ID --title T`, `sf task list --project ID`, `sf run start --task ID --agent A --location L`, `sf run list [--task ID]`, `sf run get ID`. Keep the CLI flags identical (or update cli.ts + its test).
+- Device flow: `verification_uri` = BETTER_AUTH_URL + `/device`. **No `/device` page exists in web yet.** Add it with `sf login`. `/api/auth/*` is already proxied by web.
+- `run get` output: the web run page also shows events, but there is no `run.events` command. The CLI can tail `/v1/runs/:id/events` (WS) the same way `run-events.ts` does.

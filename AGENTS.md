@@ -35,6 +35,8 @@ Internal packages export TypeScript source directly (`exports: "./src/index.ts"`
 - `pnpm test` — `vp run -r test` (Vitest 5 via Vite+; import from `vite-plus/test`)
 - `pnpm typecheck` — `tsc --noEmit` in every package
 - `pnpm build` — `vp run -r build`
+- `pnpm dev` — web + api (auxiliary worker) on http://localhost:5173; `pnpm db:migrate:local` first (shared state in `apps/api/.wrangler/state`)
+- shadcn: run `pnpm dlx shadcn@4.22.0 add <component>` from `apps/web` (writes to `packages/ui`)
 - `pnpm --filter @sf/db db:generate` — generate a Drizzle migration after editing `packages/db/src/schema.ts`
 
 ## Rules

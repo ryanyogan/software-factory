@@ -17,7 +17,7 @@ export default defineConfig({
       { files: ['apps/web/**', 'packages/ui/**'], plugins: ['typescript', 'react'] },
       // Workers RPC stubs return `Rpc.Result<T>` (a Promise intersection) that the type-aware
       // linter misreads as non-thenable; tsc accepts these awaits.
-      { files: ['apps/api/**'], rules: { 'typescript/await-thenable': 'off' } },
+      { files: ['apps/api/**', 'apps/web/**'], rules: { 'typescript/await-thenable': 'off' } },
     ],
   },
   fmt: {
@@ -32,6 +32,7 @@ export default defineConfig({
       '.claude/**',
       'pnpm-lock.yaml',
       'skills-lock.json',
+      '**/routeTree.gen.ts',
     ],
   },
   staged: {

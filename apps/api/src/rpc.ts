@@ -1,4 +1,5 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
+import app from './app';
 import { type CommandResult, runCommand } from './commands';
 
 /** What the web app forwards from its own incoming request. */
@@ -21,5 +22,13 @@ export class ApiRpc extends WorkerEntrypoint<Env> {
     const headers = new Headers(auth.headers);
     if (auth.sessionToken) headers.set('authorization', `Bearer ${auth.sessionToken}`);
     return runCommand(this.env, name, input, { headers, origin: auth.origin });
+  }
+
+  /**
+   * `env.API.fetch(request)` from web lands here (a binding to a named entrypoint calls ITS fetch),
+   * so delegate to the same Hono app as the default export: `/v1/*`, `/api/auth/*`, WebSockets.
+   */
+  override async fetch(request: Request): Promise<Response> {
+    return app.fetch(request, this.env, this.ctx);
   }
 }
