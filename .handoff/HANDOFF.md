@@ -165,3 +165,26 @@ Live events: `src/lib/run-events.ts`. The browser opens `ws(s)://<web origin>/v1
 - The GUI's copy-as-CLI strings (`apps/web/src/lib/cli.ts`, tested in `cli.test.ts`) already assume the exact syntax: `sf project create --name X [--repo URL]`, `sf project list`, `sf task create --project ID --title T`, `sf task list --project ID`, `sf run start --task ID --agent A --location L`, `sf run list [--task ID]`, `sf run get ID`. Keep the CLI flags identical (or update cli.ts + its test).
 - Device flow: `verification_uri` = BETTER_AUTH_URL + `/device`. **No `/device` page exists in web yet.** Add it with `sf login`. `/api/auth/*` is already proxied by web.
 - `run get` output: the web run page also shows events, but there is no `run.events` command. The CLI can tail `/v1/runs/:id/events` (WS) the same way `run-events.ts` does.
+
+### Stage 5: apps/cli (`sf`) + /device + WS origin guard + gate (2026-10-17)
+
+**CLI (`apps/cli`, `@sf/cli`, bin `sf`)**: citty 0.2.2, `vp pack` → `dist/cli.mjs` (+ lazy chunks; ~30 ms `--help`). All deps are devDependencies, so tsdown bundles everything (`deps.onlyBundle: ['citty','zod']`) and `node apps/cli/dist/cli.mjs` runs standalone. Root `pnpm sf ...` runs it.
+- `src/cli.ts` imports only citty; subcommands are `() => import(...)`. Global `--json` / `--api` (spread from `src/args.ts` into every leaf). API url: `--api` > `SF_API_URL` > http://localhost:5173. Token: `SF_TOKEN` env > `~/.config/sf/config.json` (`SF_CONFIG_DIR` / `XDG_CONFIG_HOME` honoured; written 0600, dir 0700).
+- Data commands → `createClient` from @sf/contract only (`src/client.ts`); arg→input mapping in `src/inputs.ts`; tables/records in `src/format.ts` + `src/output.ts` (`action()` = json|human output, errors → stderr / `{error}` JSON + exit 1).
+- `sf login` (`src/login.ts`): `/api/auth/device/code` (client_id `sf-cli`) → prints `verification_uri_complete` + user code on stderr → polls `/api/auth/device/token` (pending / slow_down +5s / denied / expired) → `GET /api/auth/get-session` with Bearer → saves `{token, apiUrl, user}`. `sf whoami` = get-session with Bearer (no dev bypass on that endpoint, so success proves the bearer path). `sf logout` = best-effort `/api/auth/sign-out` + delete config. `sf watch RUN_ID [--since N]` = Node WebSocket (undici, `headers: { authorization }`, no Origin) to `/v1/runs/:id/events`; exits on merged/abandoned or ctrl-c; `--json` = NDJSON.
+- Note: `project.create` requires `repoUrl` in the contract, so `sf project create` without `--repo` fails with `invalid_input` (flag stays optional to match the GUI's copy-as-CLI syntax).
+- Tests: `apps/cli/src/cli.test.ts` (21; fetch stubbed, runs real citty commands).
+
+**api**
+- CSWSH fix (`src/origins.ts`, used by `requireWsUser` in `app.ts`): WS upgrades with an `Origin` must match `WEB_ORIGIN` (comma-separated; wrangler var + default `http://localhost:5173,http://localhost:8787`) else 403; no-Origin upgrades have `cookie` stripped (Bearer or loopback dev bypass only). Tests: allowed origin 101, foreign origin 403 even with bearer, no-origin + bearer 101 on a non-loopback host, cookie stripping.
+- `BETTER_AUTH_URL` is now http://localhost:5173 (wrangler vars, `.dev.vars.example`, local `.dev.vars`); `trustedOrigins: webOrigins(env)`. Bearer with the raw session token works (verified in tests + live).
+- Dev sign-in (`src/dev-sign-in.ts`): Better Auth plugin endpoint `POST /api/auth/dev/sign-in`, registered only when `SF_DEV_AUTH=1`, loopback-only → creates a REAL session cookie for `dev` (device approve needs a real session; the header-less dev bypass isn't one). Must send a JSON body. Loopback check moved to `isLoopback()` in origins.ts.
+- Gotcha: through the vite dev proxy (5173), a rejected (403) WS upgrade shows up as an empty reply, not a 403; direct-to-api it's a 403.
+
+**web**: `/device` route (`src/routes/device.tsx`): `?user_code=` prefill → needs session (GitHub button, or "Continue as dev user" on loopback) → `authClient.device({query})` → Approve/Deny (`authClient.device.approve/deny({ userCode })`). `auth-client.ts` adds `deviceAuthorizationClient()` + `devSignIn()`. Screenshot `.handoff/screens/device.png`.
+
+**Verified live (pnpm dev, 5173)**: `sf login` → headless chromium (playwright-core from scratch dir, /usr/bin/chromium) dev sign-in + approve → CLI "Logged in as dev@localhost", config 0600; `sf whoami` OK via Bearer, bogus `SF_TOKEN` → error exit 1; project/task/run create/list/get human + json; `sf watch` streams `run.started` with Bearer through web's `/v1/$` proxy; browser-origin WS upgrade 101, foreign origin rejected.
+
+**Gate**: `pnpm gate` (= `bash scripts/gate.sh`) refuses if 5173 is already serving, migrates, builds CLI if needed, `setsid pnpm dev`, CLI `--json` project→task→run, `sf run list`, then `GET /tasks/<id>` HTML (SSR loader → `commandFn` server fn → `ApiRpc.command`) must contain the run id; kills the process group on exit. PASSES.
+
+**Note**: a `wrangler dev --port 8787` (pid 2187730, started 11:13, not by stage 5) was running throughout; left alone.

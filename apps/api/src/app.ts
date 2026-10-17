@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { runCommand } from './commands';
+import { wsAuthHeaders } from './origins';
 import { getAuth, resolveUserId } from './session';
 
 /** The HTTP surface (CLI REST, auth, WebSockets). Shared by the default export and `ApiRpc.fetch`. */
@@ -28,9 +29,12 @@ app.post('/v1/commands/:name', async (c) => {
   return Response.json({ error: result.error }, { status: result.status });
 });
 
-async function requireUser(env: Env, req: Request): Promise<Response | null> {
+/** Auth for WebSocket upgrades: Origin allowlist (CSWSH guard), then cookie/bearer/dev bypass. */
+async function requireWsUser(env: Env, req: Request): Promise<Response | null> {
+  const headers = wsAuthHeaders(env, req);
+  if (headers instanceof Response) return headers;
   const userId = await resolveUserId(env, {
-    headers: req.headers,
+    headers,
     origin: new URL(req.url).origin,
   });
   return userId
@@ -43,14 +47,14 @@ async function requireUser(env: Env, req: Request): Promise<Response | null> {
 
 // Live run events (WebSocket). `?since=<seq>` replays events after that seq first.
 app.get('/v1/runs/:id/events', async (c) => {
-  const denied = await requireUser(c.env, c.req.raw);
+  const denied = await requireWsUser(c.env, c.req.raw);
   if (denied) return denied;
   return c.env.RUN_LOG.getByName(c.req.param('id')).fetch(c.req.raw);
 });
 
 // Project room (WebSocket relay skeleton).
 app.get('/v1/projects/:id/room', async (c) => {
-  const denied = await requireUser(c.env, c.req.raw);
+  const denied = await requireWsUser(c.env, c.req.raw);
   if (denied) return denied;
   return c.env.PROJECT_ROOM.getByName(c.req.param('id')).fetch(c.req.raw);
 });

@@ -1,0 +1,25 @@
+{
+  "name": "@sf/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "sf — Software Factory CLI",
+  "bin": {
+    "sf": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "vp pack",
+    "test": "vp test run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@sf/config": "workspace:*",
+    "@sf/contract": "workspace:*",
+    "@types/node": "^24.19.2",
+    "citty": "0.2.2",
+    "typescript": "7.0.2"
+  }
+}

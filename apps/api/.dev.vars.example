@@ -1,6 +1,7 @@
 # Copy to .dev.vars (gitignored). Never commit real secrets.
 BETTER_AUTH_SECRET=dev-only-secret-change-me-at-least-32-chars
-BETTER_AUTH_URL=http://localhost:8787
+BETTER_AUTH_URL=http://localhost:5173
+WEB_ORIGIN=http://localhost:5173,http://localhost:8787
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 # Dev-only auth bypass: requests without a session act as the seeded "dev" user.

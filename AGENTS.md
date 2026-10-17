@@ -36,6 +36,8 @@ Internal packages export TypeScript source directly (`exports: "./src/index.ts"`
 - `pnpm typecheck` — `tsc --noEmit` in every package
 - `pnpm build` — `vp run -r build`
 - `pnpm dev` — web + api (auxiliary worker) on http://localhost:5173; `pnpm db:migrate:local` first (shared state in `apps/api/.wrangler/state`)
+- `pnpm sf <cmd>` — run the built CLI (`pnpm --filter @sf/cli build` first; `--api`/`SF_API_URL`, default http://localhost:5173)
+- `pnpm gate` — Phase 0 gate (`scripts/gate.sh`): starts dev, CLI creates project/task/run, asserts the web task page lists the run, stops dev
 - shadcn: run `pnpm dlx shadcn@4.22.0 add <component>` from `apps/web` (writes to `packages/ui`)
 - `pnpm --filter @sf/db db:generate` — generate a Drizzle migration after editing `packages/db/src/schema.ts`
 

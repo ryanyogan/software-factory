@@ -1,9 +1,8 @@
-import { createD1Db, user } from '@sf/db';
 import { createAuth, type Auth } from './auth';
+import { DEV_USER, ensureDevUser as seedDevUser } from './dev-sign-in';
+import { isLoopback } from './origins';
 
-export const DEV_USER = { id: 'dev', name: 'Dev User', email: 'dev@localhost' } as const;
-
-const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+export { DEV_USER };
 
 let cachedAuth: { env: Env; auth: Auth } | undefined;
 
@@ -20,21 +19,13 @@ export function getAuth(env: Env): Auth {
  *    routed zone/workers.dev host, so this can't be satisfied there).
  */
 export function devAuthAllowed(env: Env, origin: string | undefined): boolean {
-  if (env.SF_DEV_AUTH !== '1' || !origin) return false;
-  try {
-    return LOCAL_HOSTNAMES.has(new URL(origin).hostname);
-  } catch {
-    return false;
-  }
+  return env.SF_DEV_AUTH === '1' && isLoopback(origin);
 }
 
 let devUserSeeded = false;
 async function ensureDevUser(env: Env): Promise<void> {
   if (devUserSeeded) return;
-  await createD1Db(env.DB)
-    .insert(user)
-    .values({ ...DEV_USER, emailVerified: true })
-    .onConflictDoNothing();
+  await seedDevUser(env.DB);
   devUserSeeded = true;
 }
 

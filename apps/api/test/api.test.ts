@@ -1,6 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vite-plus/test';
 import type { StoredRunEvent } from '../src';
+import { wsAuthHeaders } from '../src/origins';
 
 const LOCAL = 'http://localhost:8787';
 
@@ -98,5 +99,86 @@ describe('ApiRpc', () => {
       status: 401,
       error: { code: 'unauthorized', message: 'sign in required' },
     });
+  });
+});
+
+describe('WebSocket origin guard (CSWSH)', () => {
+  const REMOTE = 'https://sf.example.com';
+
+  async function seedSession(): Promise<string> {
+    const token = `tok_${crypto.randomUUID().replaceAll('-', '')}`;
+    const now = Date.now();
+    await env.DB.prepare(
+      'INSERT OR IGNORE INTO user (id, name, email, email_verified) VALUES (?, ?, ?, 1)',
+    )
+      .bind('u_ws', 'WS User', 'ws@example.com')
+      .run();
+    await env.DB.prepare(
+      'INSERT INTO session (id, expires_at, token, updated_at, user_id) VALUES (?, ?, ?, ?, ?)',
+    )
+      .bind(`ses_${token}`, now + 3_600_000, token, now, 'u_ws')
+      .run();
+    return token;
+  }
+
+  function upgrade(base: string, headers: Record<string, string>) {
+    return exports.default.fetch(`${base}/v1/runs/run_guard/events`, {
+      headers: { upgrade: 'websocket', ...headers },
+    });
+  }
+
+  it('accepts an allowlisted Origin', async () => {
+    const res = await upgrade(LOCAL, { origin: 'http://localhost:5173' });
+    expect(res.status).toBe(101);
+    res.webSocket!.accept();
+    res.webSocket!.close();
+  });
+
+  it('rejects a foreign Origin with 403, even with valid credentials', async () => {
+    const token = await seedSession();
+    const res = await upgrade(LOCAL, {
+      origin: 'https://evil.example',
+      authorization: `Bearer ${token}`,
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: { code: 'forbidden' } });
+  });
+
+  it('authenticates a no-Origin client (CLI) via Bearer', async () => {
+    const token = await seedSession();
+    const res = await upgrade(REMOTE, { authorization: `Bearer ${token}` });
+    expect(res.status).toBe(101);
+    res.webSocket!.accept();
+    res.webSocket!.close();
+    expect((await upgrade(REMOTE, {})).status).toBe(401);
+  });
+
+  it('ignores cookies when no Origin is sent', () => {
+    const req = new Request(`${REMOTE}/x`, {
+      headers: { cookie: 'better-auth.session_token=x', authorization: 'Bearer y' },
+    });
+    const headers = wsAuthHeaders({}, req);
+    expect(headers).toBeInstanceOf(Headers);
+    expect((headers as Headers).has('cookie')).toBe(false);
+    expect((headers as Headers).get('authorization')).toBe('Bearer y');
+  });
+});
+
+describe('dev sign-in (SF_DEV_AUTH)', () => {
+  const signIn = (base: string) =>
+    exports.default.fetch(`${base}/api/auth/dev/sign-in`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: base },
+      body: '{}',
+    });
+
+  it('issues a real session cookie for the dev user on loopback', async () => {
+    const res = await signIn(LOCAL);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie')).toContain('better-auth.session_token=');
+  });
+
+  it('is refused on a non-loopback host', async () => {
+    expect((await signIn('https://sf.example.com')).status).not.toBe(200);
   });
 });

@@ -23,7 +23,10 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectRoom", "RunLog"] }],
   // Non-secret defaults. Secrets (GITHUB_CLIENT_ID/SECRET, BETTER_AUTH_SECRET) come from
   // .dev.vars locally and `wrangler secret put` in production. SF_DEV_AUTH must never be set in prod.
+  // BETTER_AUTH_URL is the browser-facing origin (web proxies /api/auth/* and hosts /device).
+  // WEB_ORIGIN: comma-separated origins allowed for cookie auth + WebSocket upgrades (CSWSH guard).
   "vars": {
-    "BETTER_AUTH_URL": "http://localhost:8787",
+    "BETTER_AUTH_URL": "http://localhost:5173",
+    "WEB_ORIGIN": "http://localhost:5173,http://localhost:8787",
   },
 }
