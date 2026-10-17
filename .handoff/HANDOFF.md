@@ -243,3 +243,11 @@ GUI" p95 against the 250 ms budget and record it in `perf-budget.json`.
 - 10 `sf daemon`, `sf link`, `sf run` context resolution, worktrees, diff snapshots, follow-ups, commit/PR, `sf open`
 - 11 web live run view + Needs-you updates
 - 12 `pnpm gate:local`, perf measurement, README/AGENTS updates
+
+### Stage 7: Phase 1 research (2026-10-17)
+- Wrote `.handoff/phase1-research.md` (no project code). Versions: `@anthropic-ai/claude-agent-sdk@0.3.302` (bundles Claude Code 2.1.302), `@openai/codex-sdk@0.163.0` (bundles codex 0.163.0), node 24.22, git 2.55, gh 2.102.
+- Auth VERIFIED: Claude SDK reuses the local Claude Code login (probe with ANTHROPIC_API_KEY stripped → `accountInfo()` = Claude Max, no tokens spent); Codex SDK reuses `~/.codex/auth.json` (ChatGPT login) when no `apiKey` is passed. No API keys needed. Strip `ANTHROPIC_API_KEY` from the agent env unless opted in.
+- Both SDKs resolve a native binary from a platform optional dep (273 MB + 411 MB): keep them external to the tsdown CLI bundle, lazy-import in `sf daemon`; can point at local CLIs via `pathToClaudeCodeExecutable` / `codexPathOverride`. `env` option REPLACES process.env in both SDKs.
+- Claude: streaming input (async-iterable prompt) gives mid-run follow-ups, `interrupt()`, `abortController`, `resume: sessionId`. Codex: each turn = new `codex exec --experimental-json [resume id]` process; no mid-turn steering — follow-up = next `runStreamed` on the same Thread; cancel via `TurnOptions.signal`.
+- D1: `db.update(runs).set(...).where(and(eq(id), eq(state,'queued'))).returning()` VERIFIED atomic-claim semantics on drizzle 0.45.4 (libsql). Schema lacks `failed` state and claim/session/pr columns; adding them must not trigger a table rebuild.
+- DO: use `acceptWebSocket(ws, [role])` tags + `serializeAttachment` (≤16 KiB) for per-socket identity, `getWebSockets('daemon')` to relay control frames, `setWebSocketAutoResponse` for ping/pong. Diff incl. untracked via a temp `GIT_INDEX_FILE` (no index side effects); push before `GH_PROMPT_DISABLED=1 gh pr create --draft --head --base --title --body-file -` (URL on stdout).
