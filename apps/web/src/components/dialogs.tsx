@@ -22,6 +22,7 @@ import {
 import { useNavigate } from '@tanstack/react-router';
 import { type FormEvent, useState } from 'react';
 import { toast } from 'sonner';
+import { agentsFor } from '@/lib/agents';
 import { cli } from '@/lib/cli';
 import { useCreateProject, useCreateTask, useStartRun } from '@/lib/queries';
 import { CopyCli } from './copy-cli';
@@ -150,7 +151,6 @@ export function CreateTaskDialog({
   );
 }
 
-const AGENTS: Agent[] = ['claude-code', 'codex', 'opencode'];
 const LOCATIONS: RunLocation[] = ['local', 'cloud'];
 
 export function StartRunDialog({ open, onOpenChange, taskId }: DialogProps & { taskId: string }) {
@@ -203,7 +203,9 @@ export function StartRunDialog({ open, onOpenChange, taskId }: DialogProps & { t
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {AGENTS.map((a) => (
+                    {agentsFor(
+                      typeof window === 'undefined' ? undefined : window.location.hostname,
+                    ).map((a) => (
                       <SelectItem key={a} value={a}>
                         {a}
                       </SelectItem>

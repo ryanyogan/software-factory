@@ -36,7 +36,7 @@ export const runs = sqliteTable(
     taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
-    agent: text('agent', { enum: ['claude-code', 'codex', 'opencode'] }).notNull(),
+    agent: text('agent', { enum: ['claude-code', 'codex', 'opencode', 'fake'] }).notNull(),
     location: text('location', { enum: ['local', 'cloud'] }).notNull(),
     state: text('state', {
       enum: [

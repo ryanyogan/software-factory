@@ -47,6 +47,8 @@ const RESPONSES: Record<string, unknown> = {
   'run.start': run1,
   'run.list': { runs: [run1] },
   'run.get': run1,
+  'run.message': { event: { seq: 7, type: 'user.message', payload: {}, at: 1 } },
+  'run.cancel': run1,
 };
 
 let calls: { url: string; body: unknown; auth: string | null }[];
@@ -117,6 +119,14 @@ describe('arg → command mapping', () => {
     [run, ['list'], 'run.list', {}],
     [run, ['list', '--task', 'tsk_1'], 'run.list', { taskId: 'tsk_1' }],
     [run, ['get', 'run_1'], 'run.get', { id: 'run_1' }],
+    [
+      run,
+      ['start', '--task', 'tsk_1', '--agent', 'fake', '--prompt', 'P', '--no-pr'],
+      'run.start',
+      { taskId: 'tsk_1', agent: 'fake', prompt: 'P', openPr: false },
+    ],
+    [run, ['message', 'run_1', 'also do Z'], 'run.message', { id: 'run_1', text: 'also do Z' }],
+    [run, ['cancel', 'run_1'], 'run.cancel', { id: 'run_1' }],
   ] as const)('%#: sf %s → %s', async (cmd, argv, name, body) => {
     const call = await sf(cmd, [...argv]);
     expect(call).toMatchObject({ url: `http://localhost:5173/v1/commands/${name}`, body });
@@ -198,7 +208,39 @@ describe('watch helpers', () => {
 
   it('formats events', () => {
     expect(formatEvent({ seq: 1, type: 'run.started', payload: run1, at: NOW })).toBe(
-      '   1  11:15:54  run.started       state=queued',
+      '   1  11:15:54  run.started   state=queued',
+    );
+    const f = (type: string, payload: unknown) =>
+      formatEvent({ seq: 2, type, payload, at: NOW }).slice(16);
+    expect(f('agent', { type: 'message', role: 'assistant', text: 'Hi\nthere' })).toBe(
+      'assistant     Hi ⏎ there',
+    );
+    expect(
+      f('agent', { type: 'tool.call', id: 't', name: 'Write', input: { file_path: '/w/a.md' } }),
+    ).toBe('tool          → Write /w/a.md');
+    expect(
+      f('agent', {
+        type: 'turn.completed',
+        isError: false,
+        usage: { inputTokens: 3, outputTokens: 4, costUsd: 0.01 },
+      }),
+    ).toBe('turn          done $0.0100 3 in / 4 out');
+    expect(
+      f('diff.snapshot', {
+        turn: 1,
+        base: 'x',
+        patch: '',
+        stats: { files: 2, additions: 5, deletions: 1 },
+      }),
+    ).toBe('diff          turn 1: 2 file(s) +5 -1');
+    expect(f('user.message', { id: 'm', text: 'go', author: { userId: 'u' } })).toBe(
+      'you           go',
+    );
+    expect(f('run.state', { from: 'running', to: 'review', run: run1 })).toBe(
+      'state         running → review',
+    );
+    expect(f('pr.opened', { url: 'https://github.com/a/b/pull/1', run: run1 })).toBe(
+      'pr            https://github.com/a/b/pull/1',
     );
   });
 });

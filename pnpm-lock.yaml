@@ -66,19 +66,41 @@ importers:
         version: 4.151.1(@cloudflare/workers-types@5.20261016.1)(@types/node@24.19.2)
 
   apps/cli:
+    dependencies:
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.302
+        version: 0.3.302(@anthropic-ai/sdk@0.135.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(supports-color@10.2.2)(zod@4.6.7))(zod@4.6.7)
+      '@openai/codex-sdk':
+        specifier: 0.163.0
+        version: 0.163.0
     devDependencies:
+      '@libsql/client':
+        specifier: 0.18.0
+        version: 0.18.0
+      '@sf/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
       '@sf/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@sf/contract':
         specifier: workspace:*
         version: link:../../packages/contract
+      '@sf/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@sf/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
       citty:
         specifier: 0.2.2
         version: 0.2.2
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@cloudflare/workers-types@5.20261016.1)(@libsql/client@0.18.0)(@opentelemetry/api@1.9.1)(kysely@0.29.6)
       typescript:
         specifier: 7.0.2
         version: 7.0.2

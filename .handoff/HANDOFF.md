@@ -366,3 +366,73 @@ Mapping follows research §3. Claude skips subagent traffic (`parent_tool_use_id
 - `binary:'auto'` follows whatever `claude`/`codex` is on PATH (here both are mise installs, 2.1.302 / 0.163.0, matching the SDKs). If they drift, use `binary:'bundled'`.
 - Claude `settingSources: ['project','local']` ignores the user's global settings and permission rules on purpose.
 - Smoke repos are left in the scratch dir. Tests never spawn an agent.
+
+### Stage 10: daemon + local loop CLI (2026-10-17)
+
+**What exists (all in `apps/cli/src` unless noted)**
+- `git.ts`: execFile git helpers (research §5): `mainRepoRoot` (via `--git-common-dir`, so it works from inside a task worktree), `currentBranch`, `remoteUrl`, `normalizeRepoUrl` (scp/ssh/https → `host/owner/repo`, lowercased), `isGitHubUrl`, `defaultBranch` (origin/HEAD → main/master → current), `listWorktrees`, `withRepoLock` (per-repo promise chain), `ensureWorktree({repo, path, branch})` → `{path, branch, baseBranch, baseSha = merge-base(baseBranch, HEAD), created}` (reuse if listed; else `worktree add [-b]`; refuses a non-worktree dir in the way), `diffAgainst(cwd, base, max)` (temp `GIT_INDEX_FILE`, incl. untracked, honours .gitignore, `--src-prefix=a/ --dst-prefix=b/` because user configs like `diff.mnemonicPrefix` change prefixes; numstat → stats; over max → `patch:''`, `truncated`), `commitAll` (skips when clean; user's identity, falls back to `sf <sf@localhost>` only if none; `--no-verify`), `aheadCount`.
+- `context.ts`: `findLink(cwd, config)`, `chooseProject` (for `sf link`), `resolveRunTarget` (for `sf run start`), `ContextError` with actionable messages.
+- `pr.ts`: `PrProvider { name; open({cwd, branch, base, title, body}) → {url} | null }`. `ghPrProvider` (null unless origin is GitHub; `git push -u origin <branch>`, reuse `gh pr view <branch>`, else `GH_PROMPT_DISABLED=1 gh pr create --draft --head --base --title --body-file -`), `createFakePrProvider()` (never pushes; URL `https://github.com/<owner>/<repo>/pull/<n>` from a GitHub origin, else `github.com/sf-fake/<dir>`; one URL per cwd+branch; `.opened` list), `nonePrProvider`, `selectPrProvider(name)`.
+- `daemon/socket.ts`: `WebSocketLike`, `DaemonTransport { client; connect(path) }`, `nodeTransport` (Node WebSocket + `authorization` + `x-sf-machine`, no Origin), `ManagedSocket` (backoff 0.5 s→30 s with jitter, reset after 10 s stable; `ping` every 25 s, no `pong` in 10 s → reconnect; `open()` re-run per connect so `?since=` is current).
+- `daemon/writer.ts` `RunLogWriter`: buffers, flushes on `setImmediate` as `append` frames (≤500 events, ≤512 KiB; a bigger single event — e.g. a ~1 MiB diff — goes over HTTP), acks are FIFO per frame (an `error` frame drops the oldest in-flight frame and logs). Keys `<machineId>:<8-char nonce>:<n>`. On close, unacked frames are re-queued; while the socket is down batches go to `run.append` (HTTP); 2 s grace on the very first connect before falling back. `flush()`, `close()` (flush ≤10 s then stop the socket — this closes the writer when the run ends). Incoming non-ack frames = StoredRunEvents → `onEvent`, `lastSeq` tracked from them (not from acks).
+- `daemon/worker.ts` `RunWorker` (one claimed run): `mode 'new' | 'resume'`; `run.update running` (resume only) → `ensureWorktree` at `worktreePath(dataDir, projectId, taskId)` → `run.events` history (all pages) → turns so far = #diff.snapshot; unhandled follow-ups = `user.message` with seq after the last `run.state → review|failed` → writer socket `?since=<last seq>` → `startAgent({agent, cwd: worktree, prompt, env: agentEnv ?? process.env, resumeSessionId?, costBaseUsd?, onStderr})` → forwards every AgentEvent as `{type:'agent', payload, emittedAt: Date.now()}`; `session.started` → `run.update sessionId`; each `turn.completed` → `diff.snapshot` (turn numbering continues across sessions) + `run.update costUsd` (cumulative: run.costUsd + deltas) and `session.end()` when `idle` with nothing pending. Follow-ups (socket `user.message`, room `run.message`, deduped by message id) → `session.send`; if the session is already ending they queue and the worker resumes the same session for them before wrapping up. Cancel = socket/room `run.cancel_requested` or `run.state → abandoned` → `session.cancel()`.
+  - New run on a task: resumes the latest earlier run's session **of the same agent** (`run.list {taskId}`); `costBaseUsd` = sum of `costUsd` of every run on the task with that sessionId (Claude's total continues across resume). Codex `usageBase` is NOT passed (Run has no token totals; display-only).
+  - Wrap-up: user cancel → `abandoned` (no commit, worktree left dirty); daemon shutdown → commit + agent `error{fatal}` "sf daemon stopped" + `failed`; agent not ok → commit + `failed`; ok → commit (`<task title>\n\nsf run <id>`) → if `openPr` and the branch is ahead of base → `prProvider.open` (errors become a non-fatal agent `error` event) → one `run.update {state:'review', prUrl?, costUsd}` (core emits `run.state` then `pr.opened`). A user cancel that races the wrap-up still wins (`abandoned`). Fatal setup errors (worktree, unknown adapter e.g. `opencode`) → agent `error{fatal}` + `failed`.
+- `daemon/daemon.ts` `Daemon`: one `ManagedSocket` per linked project room; every room (re)connect and every finished run → `scan()` (serialized: `task.list` per linked project + `run.list {}` → claims queued local runs of linked projects oldest-first). First scan also fails runs left `running` by this machine id (crash/kill -9). Limits: `maxConcurrency` (default 2, counts claims in flight) and one run per task. `run.claim` 409 → `stats.conflicts++`, logged "already claimed elsewhere (409)", moves on; 403 → the run is skipped for the daemon's lifetime (another user's run when no userId is known). Room notices: `run.queued` → claim; `run.cancel_requested` / `run.state→abandoned` → cancel worker; `run.message` for a run with no worker → `tryResume` (run.get; only if `claimedBy === me` and state review/failed; waits for a slot). `stop()` cancels all workers (`'shutdown'`), waits ≤15 s. `idle()` for tests.
+- `daemon/testing.ts` (test-only, not bundled): `createHub(userId)` = core `dispatch` on libsql + memory events with RunLog/ProjectRoom semantics over `FakeSocket`s (writer auth via `authorizeWriter`, replay `?since`, no echo to the writer, acks, room fan-out), `hub.dropAll()`, `hub.offline`, `hub.stats {wsFrames, httpAppends}`.
+- Commands: `commands/daemon.ts` (pid lock `<configdir>/daemon.pid`; `ensureMachineId()`; lazy-imports daemon/socket/pr/client/`@sf/adapters` inside `run`), `commands/link.ts` (`link`, `unlink`), `commands/open.ts`; `commands/run.ts` gains `message`, `cancel`, `--title`, `--no-pr`, agent `fake`; `watch.ts` `describeEvent` renders every event type.
+- Contract: `Agent` = `claude-code | codex | opencode | fake`. DB: `runs.agent` enum gets `fake` (TS-only: drizzle-kit says "No schema changes", no migration). Web: `apps/web/src/lib/agents.ts` `agentsFor(hostname)` — the Start-run dialog adds `fake` only when `window.location.hostname` is loopback (localhost/127.0.0.1/[::1]); server side stays permissive (core accepts `fake` from any surface).
+
+**Commands**
+| command | notes |
+|---|---|
+| `sf link [--project ID]` | in a git repo; links the MAIN repo root (works from a worktree). No `--project`: `origin` remote vs `project.repoUrl` (normalized); 0 / >1 matches / no remote → clear error |
+| `sf link --list`, `sf unlink` | |
+| `sf daemon [--max-concurrency N] [--pr-provider gh\|fake\|none]` | foreground, logs to stderr; ctrl-c/SIGTERM = graceful (runs → failed), twice = force exit |
+| `sf run start --agent A --prompt P [--task ID \| --title T] [--location L] [--no-pr]` | no `--task`: linked repo + `--title` creates the task, else the task whose `branch` = current branch (so from inside a task worktree it just works). Explicit form unchanged = web copy-as-CLI (`cli.ts` untouched; `--no-pr` is CLI-only) |
+| `sf run message RUN_ID "text"`, `sf run cancel RUN_ID` | |
+| `sf watch RUN_ID` | readable lines: `assistant`, `tool → Name input` / `tool ← ok …`, `files`, `todo`, `turn done $x in/out`, `diff turn n: f file(s) +a -d`, `you`, `state from → to`, `claimed`, `cancel`, `pr <url>` |
+| `sf open [RUN_ID]` | `/runs/<id>`, else current branch's task, else linked project, else `/`; xdg-open (`open` on macOS), prints the URL if it can't. Base = `SF_WEB_URL` or the API URL. `SF_NO_BROWSER=1` = print only |
+
+**Config** (`~/.config/sf/config.json`, `SF_CONFIG_DIR` overrides):
+```json
+{ "token": "…", "apiUrl": "…", "user": {"id": "…"},
+  "machineId": "mch_<32 hex>",
+  "links": { "/abs/main/repo/root": { "projectId": "prj_…", "linkedAt": "ISO" } },
+  "daemon": { "maxConcurrency": 2, "prProvider": "gh" } }
+```
+Data dir (worktrees): `SF_DATA_DIR` > `$XDG_DATA_HOME/sf` > `~/.local/share/sf` → `worktrees/<projectId>/<taskId>`.
+**PR provider selection**: `--pr-provider` > env `SF_PR_PROVIDER` > `daemon.prProvider` > `gh`. Use `fake` for the gate. Fake agent script: env `SF_FAKE_SCRIPT` (JSON or path) on the DAEMON process (agents get the daemon's env).
+
+**Bundle**: SDKs are real `dependencies` of `@sf/cli` + `deps.neverBundle` (dist keeps `import("@anthropic-ai/claude-agent-sdk")` / `import("@openai/codex-sdk")` in the adapter chunks); `@sf/adapters`, `@sf/contract` are bundled. Gotcha: citty's `sf --help` resolves EVERY subcommand to print descriptions, so command modules must keep heavy imports inside `run()` (daemon.ts does) — cold start 41–43 ms (was ~41 at baseline on this machine).
+
+**Tests** (cli 44, no tokens, no network): `git.test.ts` (worktree create/reuse/existing branch/dir in the way, diff incl. untracked without index side effects, truncation, commit, lock, fake PR), `context.test.ts` (link matching + errors, run target: --task, branch, from a worktree, --title, errors), `daemon/daemon.test.ts` against `createHub`: claim → events → diff ×2 → mid-run follow-up → commit → fake PR → review (WS only); follow-up after review resumes the same session; cancel → abandoned; two daemons → one 409; shutdown → failed + stale-running recovery; socket drop → HTTP fallback, every event exactly once in order. Web +1 (`agentsFor`).
+
+**Manual loop (verified on pnpm dev, 5173)** — exact commands:
+```sh
+pnpm db:migrate:local && pnpm build            # or just: pnpm --filter @sf/cli build
+setsid pnpm dev > /tmp/dev.log 2>&1 &           # http://localhost:5173 (dev auth bypass, no login needed)
+export SF_CONFIG_DIR=$PWD/.scratch/config SF_DATA_DIR=$PWD/.scratch/data   # isolate from ~/.config
+SF="node $REPO/apps/cli/dist/cli.mjs"
+mkdir r && cd r && git init -b main && echo hi > README.md && git add -A && git commit -m init
+git remote add origin git@github.com:acme/sf-manual.git
+$SF project create --name manual --repo https://github.com/acme/sf-manual
+$SF link
+SF_FAKE_SCRIPT=/path/script.json $SF daemon --pr-provider fake &      # script optional (default fake script)
+$SF run start --title "Manual loop test" --agent fake --prompt "create hello.md"   # prints run id
+$SF watch <run>   # in another shell;   $SF run message <run> "also add followup.md"
+git log sf/manual-loop-test -1                  # "Manual loop test\n\nsf run <run>"
+```
+Observed: claim → session → message/tool/files → follow-up mid-turn → turn 1 diff → follow-up turn → turn 2 diff → review → `pr https://github.com/acme/sf-manual/pull/1`; commit on the task branch, main checkout untouched; a second `sf run start` from inside the worktree resolved the task by branch and resumed the fake session; `sf run cancel` → abandoned in ~30 ms; SIGINT → run `failed`, work committed, daemon exits, pid file removed. **One real claude-code run** (no PR, "create hi.txt containing hi"): PASS in ~6 s, $0.081, model claude-opus-5-5, committed `hi.txt` — confirms the externalized SDK resolves from `apps/cli/dist`. Everything started was stopped. `pnpm check && pnpm typecheck && pnpm test && pnpm build && pnpm perf && pnpm gate` pass.
+
+**Gotchas for stages 11–12**
+- `pnpm gate:local` (stage 12): run the daemon with `--pr-provider fake` (or `SF_PR_PROVIDER=fake`), isolated `SF_CONFIG_DIR`/`SF_DATA_DIR`, and a repo whose origin is a GitHub URL matching the project's `repoUrl` (or use `sf link --project`). Wait for the room to connect (log line `room … connected`) before `run start`, or rely on the catch-up scan (it handles either order). Kill the daemon with SIGTERM and wait for "stopped".
+- The existing `pnpm gate` claims runs with `mch_gate_a`; a daemon linked to the gate's project would race it — don't run a daemon during `pnpm gate`.
+- Daemon scans use `run.list {}` (ALL runs, no filter) + `task.list` per linked project on every room connect / run end. Fine locally; add a `run.list {state, location}` filter if it gets slow.
+- No token (dev bypass): the daemon doesn't know its user id, so it tries to claim any queued local run in linked projects and skips ones that 403. With `sf login` it filters by `config.user.id`.
+- Diff `emittedAt` is stamped on every daemon event (Date.now() right before queueing, not right before `ws.send`; the flush is the next `setImmediate`, so it's within ~1 ms). For the latency gate use the fake `burst` step.
+- Follow-ups on a `review` run that was claimed by a daemon that is NOT running are not picked up when that daemon restarts (no catch-up for review runs with unhandled messages; only the live room notice triggers resume). Stage 11 UI should show such messages as "waiting for the daemon".
+- Fake adapter on resume restarts its turn counter at 1 (it uses `turns[0]` again), so a resumed fake session repeats the first-turn script; daemon-side `diff.snapshot.turn` keeps counting.
+- Cancelled runs leave uncommitted changes in the task worktree (the next run on the task reuses it, dirty). Worktrees are never removed yet (`removeWorktree` exists, unused).
+- `run.update` without a state change but with sessionId/costUsd emits no event; the web learns cost from `turn.completed.usage.costUsd` or by re-fetching the run.
+- Web run view (stage 11) gets claude `file.change` paths absolute (worktree path); render the diff.snapshot instead.

@@ -26,7 +26,8 @@ export const Task = z.object({
 });
 export type Task = z.infer<typeof Task>;
 
-export const Agent = z.enum(['claude-code', 'codex', 'opencode']);
+/** `fake` is the scripted test agent (@sf/adapters); the web GUI only offers it on loopback (dev). */
+export const Agent = z.enum(['claude-code', 'codex', 'opencode', 'fake']);
 export type Agent = z.infer<typeof Agent>;
 
 export const RunLocation = z.enum(['local', 'cloud']);

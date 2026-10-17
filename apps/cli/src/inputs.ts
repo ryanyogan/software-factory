@@ -20,13 +20,19 @@ export const inputs = {
     agent: string;
     location?: string;
     prompt: string;
+    pr?: boolean;
   }): CommandInput<'run.start'> =>
     ({
       taskId: a.task,
       agent: a.agent,
       location: opt(a.location),
       prompt: a.prompt,
+      ...(a.pr === false ? { openPr: false } : {}),
     }) as CommandInput<'run.start'>,
+  runMessage: (a: { id: string; text: string }): CommandInput<'run.message'> => ({
+    id: a.id,
+    text: a.text,
+  }),
   runList: (a: { task?: string }): CommandInput<'run.list'> => ({ taskId: opt(a.task) }),
   runGet: (a: { id: string }): CommandInput<'run.get'> => ({ id: a.id }),
 };
