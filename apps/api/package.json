@@ -1,0 +1,29 @@
+{
+  "name": "@sf/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "cf-typegen": "wrangler types --env-file .dev.vars.example",
+    "typecheck": "pnpm cf-typegen >/dev/null && tsc --noEmit && tsc --noEmit -p test",
+    "test": "vp test run",
+    "auth:schema": "auth generate --config scripts/auth-schema.config.ts --output ../../packages/db/src/auth-schema.ts -y && vp fmt ../../packages/db/src/auth-schema.ts"
+  },
+  "dependencies": {
+    "@better-auth/drizzle-adapter": "1.7.10",
+    "@sf/contract": "workspace:*",
+    "@sf/core": "workspace:*",
+    "@sf/db": "workspace:*",
+    "better-auth": "1.7.10",
+    "hono": "4.13.13"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.4",
+    "@sf/config": "workspace:*",
+    "auth": "1.7.10",
+    "typescript": "7.0.2",
+    "wrangler": "4.151.1"
+  }
+}

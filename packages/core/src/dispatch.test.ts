@@ -53,6 +53,18 @@ describe('dispatch', () => {
     expect((await dispatch(ctx, 'run.list', { taskId: task.id })).runs).toEqual([run]);
   });
 
+  it('appends run.started to the events port', async () => {
+    const { task } = await seedTask();
+    const appended: [string, unknown][] = [];
+    ctx.events = {
+      appendRunEvent: async (runId, event) => {
+        appended.push([runId, event]);
+      },
+    };
+    const run = await dispatch(ctx, 'run.start', { taskId: task.id, agent: 'codex' });
+    expect(appended).toEqual([[run.id, { type: 'run.started', payload: run }]]);
+  });
+
   it('rejects invalid input', async () => {
     await expect(
       dispatch(ctx, 'project.create', { name: '', repoUrl: 'not a url' }),

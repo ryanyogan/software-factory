@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sf-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sf",
+      // Placeholder for local dev. Replace with the id from `wrangler d1 create sf` before deploying.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/db/drizzle",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "PROJECT_ROOM", "class_name": "ProjectRoom" },
+      { "name": "RUN_LOG", "class_name": "RunLog" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectRoom", "RunLog"] }],
+  // Non-secret defaults. Secrets (GITHUB_CLIENT_ID/SECRET, BETTER_AUTH_SECRET) come from
+  // .dev.vars locally and `wrangler secret put` in production. SF_DEV_AUTH must never be set in prod.
+  "vars": {
+    "BETTER_AUTH_URL": "http://localhost:8787",
+  },
+}

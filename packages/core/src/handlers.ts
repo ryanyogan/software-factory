@@ -112,7 +112,9 @@ export const handlers: Handlers = {
       createdAt: now(ctx),
     };
     await ctx.db.insert(runs).values(row);
-    return toRun(row);
+    const run = toRun(row);
+    await ctx.events?.appendRunEvent(run.id, { type: 'run.started', payload: run });
+    return run;
   },
 
   async 'run.get'(ctx, input) {

@@ -13,7 +13,12 @@ export default defineConfig({
     ],
     plugins: ['typescript', 'vitest'],
     options: { typeAware: true, typeCheck: true },
-    overrides: [{ files: ['apps/web/**', 'packages/ui/**'], plugins: ['typescript', 'react'] }],
+    overrides: [
+      { files: ['apps/web/**', 'packages/ui/**'], plugins: ['typescript', 'react'] },
+      // Workers RPC stubs return `Rpc.Result<T>` (a Promise intersection) that the type-aware
+      // linter misreads as non-thenable; tsc accepts these awaits.
+      { files: ['apps/api/**'], rules: { 'typescript/await-thenable': 'off' } },
+    ],
   },
   fmt: {
     singleQuote: true,
@@ -22,6 +27,8 @@ export default defineConfig({
     ignorePatterns: [
       '**/drizzle/**',
       '.handoff/**',
+      '**/worker-configuration.d.ts',
+      '**/.wrangler/**',
       '.claude/**',
       'pnpm-lock.yaml',
       'skills-lock.json',

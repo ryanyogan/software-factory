@@ -19,7 +19,7 @@ pnpm monorepo (pnpm 11, node 24) on VoidZero tooling via Vite+ (`vp`). Build log
 
 ## Layout
 
-- `apps/` — `web` (TanStack Start on Cloudflare), `api` (Worker + Durable Objects), `cli` (`sf`), `mcp`. Not created yet in stage 2.
+- `apps/` — `web` (TanStack Start on Cloudflare), `api` (`sf-api` Worker: REST `/v1/commands/:name` + `ApiRpc` RPC entrypoint + `ProjectRoom`/`RunLog` DOs + Better Auth), `cli` (`sf`), `mcp`.
 - `packages/contract` — zod command definitions (`commands` registry) + typed HTTP `createClient`. The one API.
 - `packages/core` — handlers keyed by command name + `dispatch(ctx, name, rawInput)`.
 - `packages/db` — Drizzle schema for D1; migrations in `packages/db/drizzle`.

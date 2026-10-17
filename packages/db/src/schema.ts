@@ -1,8 +1,9 @@
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
-// NOTE (stage 3): Better Auth tables (user, session, account, verification, deviceCode)
-// are generated into src/auth-schema.ts and re-exported from here. `runs.startedBy`
-// will then reference user.id; for now it is a plain text user id.
+// Better Auth tables (user, session, account, verification, device_code) are generated into
+// ./auth-schema.ts by `pnpm --filter @sf/api auth:schema`; do not hand-edit that file.
+// `runs.startedBy` holds a Better Auth user.id but has no FK, so core tests need no user rows.
+export * from './auth-schema';
 
 export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(),
