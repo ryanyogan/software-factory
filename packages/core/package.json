@@ -1,0 +1,24 @@
+{
+  "name": "@sf/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@sf/contract": "workspace:*",
+    "@sf/db": "workspace:*",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "@libsql/client": "0.18.0",
+    "@sf/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "7.0.2"
+  }
+}
