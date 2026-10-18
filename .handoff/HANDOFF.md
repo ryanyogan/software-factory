@@ -568,3 +568,37 @@ against the deployed environment.
 - 16 indexing pipeline (Queues/Workflows/AI Search) + GitHub webhook
 - 17 `apps/mcp` server generated from the contract + daemon injection
 - 18 GUI context panel + search, `pnpm gate:brain`, adoption metric, docs
+
+### Stage 13: Phase 2 research (2026-10-17)
+- Wrote `.handoff/phase2-research.md` (versions, signatures, wrangler snippets, deploy commands; UNVERIFIED marked). No project code written.
+- **MCP: changes decision #5.** `McpAgent` is `@deprecated` and feature-frozen in `agents@0.28.1`. Use stateless `createMcpHandler` from `agents/mcp/server` (no DO) + `@modelcontextprotocol/server@2.3.1` (SDK v2). Its `registerTool` takes zod 4 schemas directly (Standard Schema; verified with tsc).
+  - Mount it in **sf-api at `/mcp`**, calling `runCommand` directly. Web adds a `routes/mcp.ts` proxy; no vite change.
+  - Keep `apps/mcp` as the `@sf/mcp` `buildServer(call)` factory.
+  - Auth = the existing Better Auth bearer session token, with a 401 `WWW-Authenticate: Bearer` precheck. Better Auth 1.7 has no `mcp()`/`oidcProvider()` in `better-auth/plugins` (now `@better-auth/mcp`); defer OAuth.
+- **Retrieval: changes decision #7.** Use Vectorize (namespace per project) + `@cf/qwen/qwen3-embedding-0.6b` (1024 dims) + D1 FTS5, fused with RRF, behind `BrainPort`. Not AI Search, because AI Search re-chunks, is remote-only even in dev, and bills $0.75/1k hybrid queries from 2026-11-01.
+- Indexing: GitHub org webhook (HMAC verified) via the web `/v1/*` proxy → Queue `sf-index` → Workflow `IndexRepoWorkflow`, which fetches with compare + trees + raw contents. Auth is a fine-grained PAT secret (no GitHub App yet). Model calls go through AI Gateway `sf` with metadata `{org, project, run, op}` (max 5 keys).
+- **Gotcha:** `AI` and Vectorize bindings are always remote, even in `pnpm dev`. Tests and gates must use `memoryBrain`; D1 FTS5, Queues and Workflows run in Miniflare (runtime unverified, so smoke them first in stage 17). `wrangler d1 export` fails once FTS5 virtual tables exist.
+- Skills: Codex 0.163 reads `.agents/skills/` (and `.codex/skills`) but **not** `.claude/skills`; Claude reads `.claude/skills`.
+  - `sf skills sync` writes the canonical `.agents/skills/sf-*/` + per-skill symlinks in `.claude/skills/`, gitignored.
+  - The daemon syncs into each worktree before the agent starts.
+  - Claude SDK: add `skills: 'all'`.
+- Injection:
+  - Claude: `mcpServers: { sf: { type: 'http', url, headers: { Authorization }, alwaysLoad: true } }` + `allowedTools: ['mcp__sf__*']`. Tool name is `mcp__sf__brain_search`.
+  - Codex: `config.mcp_servers.sf = { url, bearer_token_env_var: 'SF_MCP_TOKEN', default_tools_approval_mode: 'approve' }` + the token in `env`.
+  - Fix `codex/map.ts` to emit the same `mcp__sf__*` name.
+  - Fake: a new `mcp` script step using `@modelcontextprotocol/sdk@1.32.1` (move it to dependencies).
+  - The Claude SDK puts the token on argv (`--mcp-config`); a per-run token is a follow-up.
+- **Deploy (stage 14):**
+  - URLs: `https://sf-web.ryanyogan.workers.dev` (web) and `sf-api.ryanyogan.workers.dev`.
+  - GitHub OAuth callback: `https://sf-web.ryanyogan.workers.dev/api/auth/callback/github`.
+  - Prod bugs to fix first:
+    - (1) the CLI ignores the saved `config.apiUrl` (`resolveApiUrl` = `--api > SF_API_URL > localhost`; client/daemon/watch/open), so post-login commands hit localhost.
+    - (2) set `workers_dev: false` + `preview_urls: false` on sf-api (everything goes via the web proxies).
+  - Better Auth secure cookies are automatic with an https `baseURL`. The dev bypass is loopback-gated, so it's safe if `SF_DEV_AUTH` is never put as a secret.
+- Uncommitted edits to `.github/workflows/ci.yml` and `scripts/gate-local.mjs` existed during this stage (not mine; left untouched).
+- **Revised stages 14–18** (MCP moves before indexing, because the gate needs it and it needs no cloud resources):
+  - 14 first deploy + the CLI `apiUrl` fix + `workers_dev:false` + prod smoke (needs the user's OAuth app)
+  - 15 contract brain commands + `BrainPort`/`memoryBrain` + registry sync + `sf skills sync` (.agents + symlinks, per-worktree) + `sf context`
+  - 16 `/mcp` in sf-api from the contract + daemon injection (claude/codex/fake `mcp` step) + codex name normalization + `mcp-tool-call` budget
+  - 17 indexing: D1 chunk/FTS5 tables, Vectorize + embeddings adapter via AI Gateway, GitHub webhook → Queue → Workflow, merged-PR review comments (creates queues/index/gateway/secrets)
+  - 18 GUI context panel + search, `pnpm gate:brain`, adoption metric, deployed smoke, docs
