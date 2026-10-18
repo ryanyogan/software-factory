@@ -44,6 +44,18 @@ jobs:
       # google-chrome at /usr/bin/google-chrome; gate:local fails, never skips, without a browser).
       # Also enforces the latency budgets in perf-budget.json.
       - run: pnpm gate:local
+        env:
+          SF_GATE_KEEP: '1'
+
+      - name: Upload gate:local evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-local-failure
+          path: |
+            .perf/
+            /tmp/sf-gate-local.*/*.log
+          if-no-files-found: ignore
 
   # deploy:
   #   needs: ci

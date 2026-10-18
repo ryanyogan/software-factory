@@ -121,11 +121,21 @@ function probe() {
 const browser = await chromium.launch({ executablePath, headless: true });
 const result = { at: new Date().toISOString(), chromium: executablePath };
 let exitCode = 0;
+const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+const pageErrors = [];
+/** Browser-side trail (sockets, navigations, failed requests), printed only when the gate fails. */
+const trail = [];
+const note = (s) => trail.push(`${((Date.now() - t0) / 1000).toFixed(1)}s ${s}`);
+page.on('pageerror', (e) => pageErrors.push(e.message));
+page.on('console', (m) => m.type() === 'error' && pageErrors.push(`console: ${m.text()}`));
+page.on('framenavigated', (f) => f === page.mainFrame() && note(`navigated ${f.url()}`));
+page.on('requestfailed', (r) => note(`request failed ${r.url()} ${r.failure()?.errorText}`));
+page.on('websocket', (ws) => {
+  note(`ws open ${ws.url()}`);
+  ws.on('socketerror', (e) => note(`ws error ${ws.url()} ${e}`));
+  ws.on('close', () => note(`ws close ${ws.url()}`));
+});
 try {
-  const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
-  const pageErrors = [];
-  page.on('pageerror', (e) => pageErrors.push(e.message));
-  page.on('console', (m) => m.type() === 'error' && pageErrors.push(`console: ${m.text()}`));
   await page.addInitScript(probe);
 
   // Warm the dev server (on-demand compile) before the run exists.
@@ -333,6 +343,21 @@ try {
 } catch (e) {
   console.error(`gate:local: ${e instanceof Error ? e.message : String(e)}`);
   exitCode = 1;
+  // Evidence for CI, where the failure can't be reproduced interactively.
+  const out = join(root, '.perf');
+  mkdirSync(out, { recursive: true });
+  console.error(`--- page url ${page.url()}`);
+  const status = await page
+    .getByTestId('ws-status')
+    .textContent({ timeout: 1000 })
+    .catch(() => '(none)');
+  console.error(`--- ws-status ${status}`);
+  if (pageErrors.length) console.error(`--- page errors\n${pageErrors.join('\n')}`);
+  console.error(`--- browser trail\n${trail.slice(-40).join('\n')}`);
+  await page
+    .screenshot({ path: join(out, 'gate-local-failure.png'), fullPage: true })
+    .catch(() => {});
+  writeFileSync(join(out, 'gate-local-failure.html'), await page.content().catch(() => ''));
 } finally {
   await browser.close();
 }
