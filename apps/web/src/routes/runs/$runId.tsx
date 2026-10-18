@@ -34,6 +34,7 @@ import {
 } from 'react';
 import { toast } from 'sonner';
 import { CopyCli } from '@/components/copy-cli';
+import { ExternalLink } from '@/components/external-link';
 import { PageHeader, TableSkeleton, Time } from '@/components/page';
 import { StateBadge } from '@/components/state-badge';
 import { TranscriptView } from '@/components/transcript';
@@ -194,16 +195,14 @@ function RunFacts({
       <Fact label="Branch">{branch ? <span className="font-mono">{branch}</span> : '—'}</Fact>
       <Fact label="PR">
         {run.prUrl ? (
-          <a
+          <ExternalLink
             href={run.prUrl}
-            target="_blank"
-            rel="noreferrer noopener"
             className="flex items-center gap-1 underline underline-offset-3"
             data-testid="run-pr"
           >
             <GitPullRequestIcon className="size-3.5" />
             {run.prUrl.replace(/^https?:\/\/(www\.)?/, '')}
-          </a>
+          </ExternalLink>
         ) : run.openPr ? (
           'when the run ends'
         ) : (

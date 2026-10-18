@@ -475,3 +475,48 @@ Observed: claim → session → message/tool/files → follow-up mid-turn → tu
 - For "agent event → GUI" latency: events carry `emittedAt`; the page applies frames on the next animation frame (rAF pauses in background tabs — measure in a visible/headless page). A `performance.now()` hook would need adding (none exists).
 - The fake adapter repeats its first-turn script on resume (stage 10 note), so a review-run follow-up replays turn 1 steps (incl. sleeps).
 - Old queued runs from earlier stages (no daemon linked) fill Needs you locally; harmless.
+
+### Stage 12: Phase 1 gate + perf (2026-10-17)
+
+**`pnpm gate:local`** = `scripts/gate-local.sh` (lifecycle) + `scripts/gate-local.mjs` (driver, playwright-core 1.63.0 root devDep) + `scripts/gate-local.fake.json` (fake agent script, set as `SF_FAKE_SCRIPT` on the daemon only).
+- Refuses if port 5173 is in use (node `net.connect`) or no chromium (`SF_CHROMIUM` > `/usr/bin/chromium(-browser)` > `google-chrome(-stable)` > playwright's own download) — fails, never skips.
+- Isolation: one `mktemp -d` holding `SF_STATE_DIR` (D1/DO state, migrated first), `SF_CONFIG_DIR`, `XDG_DATA_HOME` (worktrees), the repo and logs; `SF_DATA_DIR`/`SF_PR_PROVIDER` unset. Deleted on exit (`SF_GATE_KEEP=1` keeps it). dev, daemon and driver each run under `setsid`; the EXIT trap TERMs then KILLs every process group (verified: TERM mid-run → exit 130, nothing left on 5173, temp dir gone). On failure the dev/daemon log tails are printed.
+- Flow: dev → temp repo (origin `git@github.com:sf-gate/local-<stamp>.git`, never pushed) → `sf project create` → `sf link` (origin match) → `sf daemon --pr-provider fake` (waits for `room … connected`) → driver: warm `/` → `sf run start --agent fake --title … --prompt …` from inside the repo → run page: `ws-status` live, assistant + Bash tool rows, `diff-snapshot[data-turn=1]` (asserted delivered after the socket went live), `run-pr`, state review → follow-up typed into the page's follow-up box + Ctrl+Enter → `user-message` bubble → `diff-snapshot[data-turn=2]` contains the follow-up → API: review again after the message, `prUrl` `https://github.com/sf-gate/…/pull/1`, `pr.opened` → git: `gate.md` in the task worktree, last commit body has `sf run <id>`, exactly 2 commits `main..branch`, main checkout clean → second run (`--title "Gate cancel …"`), wait for `session.started`, `sf run cancel` → `abandoned` (11–21 ms) → perf → no page errors / console errors.
+- The browser follow-up goes to a `review` run, so it exercises resume (fake replays `turns[0]` with the follow-up as prompt).
+- **`pnpm gate` is isolated too** (temp `SF_STATE_DIR`, port check, log deleted on success). `apps/web/vite.config.ts` `persistState.path` = `SF_STATE_DIR` || `apps/api/.wrangler/state`; `@sf/api db:migrate:local` passes `--persist-to "${SF_STATE_DIR:-.wrangler/state}"` (both append `v3/`; same D1 file name). Verified the dev DB has 0 `gate-local*` projects after the runs.
+- **`pnpm db:reset:local`** = `rm -rf apps/api/.wrangler/state && pnpm db:migrate:local`. Added, NOT run — the dev sidebar still has the old `gate-*` / `Playwright Demo` projects until the user runs it (with `pnpm dev` stopped).
+- CI: `pnpm gate:local` added after `pnpm gate` (ubuntu-latest ships google-chrome at `/usr/bin/google-chrome`). **Not verified on a runner** (no remote); if it fails there, first suspects are chrome sandboxing as root-less runner user (should be fine) and the latency budgets on a slow shared runner.
+
+**Perf** (`perf-budget.json`, `source: "gate:local"`, `measured: true`, budget = plan target, baseline = worst p95 of the two final runs). gate:local enforces them and writes `.perf/gate-local.json` (gitignored); `pnpm perf` re-checks that file when present and prints a note otherwise.
+| budget | how | run 1 p50 / p95 | run 2 p50 / p95 | target |
+|---|---|---|---|---|
+| local-agent-event-to-gui | 40 burst messages 25 ms apart in the follow-up turn; daemon `emittedAt` → MutationObserver sees the `assistant` node (`performance.timeOrigin + now()`, same clock) | 27.4 / 68.3 ms | 25.6 / 41.6 ms | 250 ms |
+| route-change | 20 sidebar clicks Needs you ↔ Projects → `<h1>` + no skeleton, next rAF | 31.6 / 32.3 ms | 31.3 / 32.2 ms | 100 ms |
+| gui-first-load-warm | 5 reloads of `/` (warm cache), navigation start → `load` | 63.4 / 85.1 ms | 63.7 / 93 ms | 1000 ms |
+Caveats: measured against `pnpm dev` (unbundled vite modules, workerd in-process), not a production deploy. Route-change is frame-quantized (two rAFs ≈ 32 ms floor). Event→GUI is DOM insertion, not paint, and includes the page's per-rAF frame batching. CLI cold start 42–54 ms, web initial JS 236.4 KiB, total 264.4 KiB (unchanged).
+
+**Stage 10 gap closed — offline follow-ups**: `Daemon.recoverStale` (first scan after start) now also looks at runs it claimed (`claimedBy === machineId`) in `review`/`failed`; if the last `user.message` seq is after the last `run.state → review|failed` (`hasUnhandledFollowUp`, paged `run.events`), the run is queued in `resumeWanted` and resumed by the same scan (the worker already delivers exactly those messages). Test: review → daemon stopped → `run.message` → new daemon resumes (`stats.resumed === 1`), turn-2 diff has the message; a third start with nothing new does not resume. Only on startup — a room reconnect after a network blip still relies on live notices.
+
+**Stage 8 risk closed — RunLog closes to writers at terminal state**: `RunLog` caches `ended` (lazy: newest `run.state` row by PK desc, then kept current in `insert` from the `run.state` events core appends); `webSocketMessage` replies `{type:'error', code:'forbidden', message:'run has ended'}` for appends once the run is merged/abandoned. Viewer replay/tail unaffected; HTTP `run.append` already re-checked in core. Test: open writer socket → append ok → owner `run.update abandoned` → append → forbidden, log length unchanged.
+
+**Security fix (from the coordinator) — unsafe URL schemes**: zod 4.6 `z.url()` accepts `javascript:`. Contract now has `HttpUrl = z.url({ protocol: /^https?$/ })` (zod 4.6.7 `$ZodURLDef.protocol`, checked in the `.d.ts`/impl; it tests the scheme without the colon). Inputs (`project.create.repoUrl`, `run.update.prUrl`) and `pr.opened.url` use it; outputs `Project.repoUrl` / `Run.prUrl` use `HttpUrl.nullable().catch(null)`, so a legacy unsafe row reads back as `null` instead of failing the command (dispatch returns the parsed output). Web: new `components/external-link.tsx` `ExternalLink` (http(s) only via new `webHref` in `lib/markdown.ts`; anything else renders as plain text `<span data-unsafe-url>`), used for the run page PR fact (`run-pr`), the runs-table PR link (`pr-link`) and the transcript `pr` marker. Markdown links keep `safeHref` (http(s)/mailto). Tests: core rejects `run.update prUrl: 'javascript:alert(1)'` / `data:` and `project.create repoUrl: 'javascript:…'` (invalid_input), legacy row → null; web `external-link.test.ts` renders the link via `react-dom/server` (https → `<a target=_blank rel=noreferrer noopener>`; `javascript:`, ` JavaScript:`, `data:`, `//x` → no `<a>`, no href) and checks a `javascript:` `pr.opened` never becomes a `pr` transcript block while an https one does.
+
+**Results**: `pnpm check && pnpm typecheck && pnpm test && pnpm build && pnpm perf && pnpm gate && pnpm gate:local` passed twice in a row. Timings (pass 1 / pass 2): check 3.2/3.0 s, typecheck 4.6/4.7 s, test 8.5/7.2 s, build 2.9/2.6 s, perf 1.0/1.0 s, gate 9.4/9.7 s, **gate:local 25.7/27.0 s** (dev healthy in 6–7 s; driver ~13 s). Tests: contract 9, adapters 33, core 28, cli 45, api 20, web 27. 1 stock `use-mobile` lint warning (pre-existing).
+
+**Phase 1 status**
+- Done (technical gate green): daemon + link + worktrees + claude-code/codex/fake adapters + live run view + follow-ups (live, after review, and while offline) + cancel + commit + draft PR (gh / fake) + Needs-you live + measured latency budgets.
+- Not automatable: the human gate (5 engineers daily for a week). Nothing is deployed; the deploy checklist in README is unexercised.
+
+**Known gaps**
+- Offline catch-up runs on daemon startup only, not on room reconnect. Daemon scans list ALL runs (`run.list {}`) every room connect / run end.
+- Cancelled runs leave the task worktree dirty; worktrees are never removed. Fake adapter restarts its script on resume.
+- No daemon-presence API (web always shows the "needs `sf daemon`" hint for local runs). No machine registry; owner check is the only boundary; no project ACLs (any signed-in user reads every run).
+- Perf numbers are against `pnpm dev`; no production-build measurement. Web initial JS 236 KiB gzip is heavy. `command-palette-open` has no palette yet.
+- gate:local in CI is unverified; real-agent coverage is the manual smoke only. Network egress for agents is unrestricted.
+- The developer's dev DB still holds old gate/demo rows → `pnpm db:reset:local` when they choose.
+
+**Suggested Phase 2 start**
+1. Dogfood week with the real agents (fix what the 5-engineer gate surfaces first; run `pnpm db:reset:local`, `sf login` against a deployed API — do the deploy checklist).
+2. `apps/mcp`: McpAgent server with tools generated from the `@sf/contract` registry (same `dispatch`), plus the `mcp-tool-call` 300 ms budget measured like gate:local.
+3. `packages/brain`: org-brain storage + search (`brain-search` 800 ms budget), then skills sync.
+4. Small carry-overs: `run.list {state, location}` filter for the daemon, catch-up on reconnect, worktree cleanup on merge/abandon, a daemon heartbeat for the web hint.

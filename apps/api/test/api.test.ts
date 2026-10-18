@@ -322,6 +322,24 @@ describe('RunLog writer socket', () => {
     await writer.next((f) => f.type === 'run.cancel_requested');
     writerRes.webSocket!.close();
   });
+
+  it('rejects writer appends once the run is terminal, on an already-open socket', async () => {
+    const { id } = await claimedRun();
+    const writerRes = await openWs(`/v1/runs/${id}/events?since=3`, { 'x-sf-machine': M1 });
+    const writer = frames(writerRes.webSocket!);
+    writerRes.webSocket!.send(JSON.stringify({ type: 'append', events: [agentMsg('before')] }));
+    expect(await writer.next((f) => f.type === 'ack')).toEqual({ type: 'ack', seqs: [4] });
+
+    // Owner force-abandons (escape hatch); the socket stays open but the log is closed.
+    expect((await command('run.update', { id, state: 'abandoned' })).status).toBe(200);
+    await writer.next((f) => f.type === 'run.state');
+    writerRes.webSocket!.send(JSON.stringify({ type: 'append', events: [agentMsg('after')] }));
+    expect(await writer.next((f) => f.type === 'error')).toMatchObject({ code: 'forbidden' });
+    const list = await exports.default.fetch(`${LOCAL}/v1/runs/${id}/events?since=0`);
+    const { events } = (await list.json()) as { events: { type: string }[] };
+    expect(events).toHaveLength(5); // started, claimed, state, 'before', state→abandoned
+    writerRes.webSocket!.close();
+  });
 });
 
 describe('HTTP event endpoints', () => {

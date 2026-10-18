@@ -67,14 +67,30 @@ const kb = (bytes) => Math.round((bytes / 1024) * 10) / 10;
 results.push({ id: 'web-initial-js-gzip', value: kb([...initial].reduce((s, f) => s + gz(f), 0)) });
 results.push({ id: 'web-total-js-gzip', value: kb(jsFiles.reduce((s, f) => s + gz(f), 0)) });
 
+// --- Latency budgets: measured in a real browser by `pnpm gate:local` (scripts/gate-local.mjs),
+// which enforces them itself and records p95s in .perf/gate-local.json. Re-checked here when present.
+const latencyFile = join(root, '.perf/gate-local.json');
+const latency = existsSync(latencyFile) ? JSON.parse(readFileSync(latencyFile, 'utf8')) : null;
+const fromGate = config.budgets.filter((b) => b.source === 'gate:local');
+for (const b of fromGate) {
+  if (latency?.[b.id])
+    results.push({ id: b.id, value: latency[b.id].p95, note: 'p95, gate:local' });
+}
+
 // --- Report ---
 let failed = false;
 console.log('perf budget');
-for (const { id, value } of results) {
+for (const { id, value, note } of results) {
   const b = budgets[id];
   const ok = value <= b.budget;
   failed ||= !ok;
-  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${id}: ${value} ${b.unit} (budget ${b.budget})`);
+  const extra = note ? `, ${note}` : '';
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${id}: ${value} ${b.unit} (budget ${b.budget}${extra})`);
+}
+if (fromGate.length && !latency) {
+  console.log(`  note ${fromGate.map((b) => b.id).join(', ')}: run \`pnpm gate:local\` to measure`);
+} else if (latency) {
+  console.log(`  (latency from .perf/gate-local.json, ${latency.at})`);
 }
 for (const b of config.budgets.filter((b) => b.measured === false)) {
   console.log(`  todo ${b.id}: ${b.budget} ${b.unit} p95 — not measured yet`);

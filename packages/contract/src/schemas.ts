@@ -5,10 +5,18 @@ export const Timestamp = z.iso.datetime();
 
 export const Id = z.string().min(1);
 
+/**
+ * An http(s) URL. Plain `z.url()` accepts any scheme (`javascript:` included), and these values
+ * are rendered as links. Use for inputs; outputs use `StoredHttpUrl`.
+ */
+export const HttpUrl = z.url({ protocol: /^https?$/ });
+/** Output form: legacy rows with another scheme read back as null instead of failing the command. */
+const StoredHttpUrl = HttpUrl.nullable().catch(null);
+
 export const Project = z.object({
   id: Id,
   name: z.string().min(1).max(200),
-  repoUrl: z.url().nullable(),
+  repoUrl: StoredHttpUrl,
   createdAt: Timestamp,
 });
 export type Project = z.infer<typeof Project>;
@@ -72,7 +80,7 @@ export const Run = z.object({
   claimedAt: Timestamp.nullable(),
   /** Agent session/thread id (for resume), reported by the daemon. */
   sessionId: z.string().min(1).nullable(),
-  prUrl: z.url().nullable(),
+  prUrl: StoredHttpUrl,
   /** Cumulative agent cost in USD, when the agent reports it (Codex does not). */
   costUsd: z.number().nonnegative().nullable(),
   /** When the run last left `running` for review/failed/abandoned/merged. */

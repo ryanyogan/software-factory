@@ -40,6 +40,11 @@ jobs:
       - run: cp apps/api/.dev.vars.example apps/api/.dev.vars
       - run: pnpm gate
 
+      # Phase 1 gate: dev + sf daemon + fake agent + headless chromium (the runner image ships
+      # google-chrome at /usr/bin/google-chrome; gate:local fails, never skips, without a browser).
+      # Also enforces the latency budgets in perf-budget.json.
+      - run: pnpm gate:local
+
   # deploy:
   #   needs: ci
   #   if: github.ref == 'refs/heads/master' && github.event_name == 'push'

@@ -1,0 +1,16 @@
+{
+  "$comment": "Fake agent script for pnpm gate:local (SF_FAKE_SCRIPT on the daemon). A resumed fake session replays turns[0], so the follow-up turn runs these steps again with the follow-up as {{prompt}}. The burst is the latency probe: scripts/gate-local.mjs matches each 'lat-<i> …' message to its DOM arrival.",
+  "turns": [
+    {
+      "steps": [
+        { "type": "sleep", "ms": 1500 },
+        { "type": "message", "text": "Working on: {{prompt}}" },
+        { "type": "tool", "name": "Bash", "input": { "command": "ls" }, "output": "README.md" },
+        { "type": "burst", "count": 40, "intervalMs": 25, "text": "lat-{{i}} {{prompt}}" },
+        { "type": "write", "path": "gate.md", "content": "# Gate\n\n{{prompt}}\n" },
+        { "type": "sleep", "ms": 1500 },
+        { "type": "message", "text": "Done with turn {{turn}}." }
+      ]
+    }
+  ]
+}

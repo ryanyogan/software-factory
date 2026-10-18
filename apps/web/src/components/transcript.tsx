@@ -41,6 +41,7 @@ import {
 import { DiffSnapshotView } from './diff-view';
 import { Markdown } from './markdown';
 import { Time } from './page';
+import { ExternalLink } from './external-link';
 
 /**
  * The run transcript. `MessageScroller` follows new rows (autoScroll) and stops following as soon as
@@ -172,10 +173,7 @@ function BlockView({ block }: { block: Block }) {
             <GitPullRequestIcon />
           </MarkerIcon>
           <MarkerContent>
-            Opened{' '}
-            <a href={block.url} target="_blank" rel="noreferrer noopener">
-              {block.url}
-            </a>
+            Opened <ExternalLink href={block.url} />
           </MarkerContent>
         </Marker>
       );

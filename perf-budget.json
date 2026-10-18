@@ -1,5 +1,5 @@
 {
-  "$comment": "Checked by scripts/perf-budget.mjs (pnpm perf) after pnpm build. Size budgets are ~1.25x the size recorded in `baseline` (stage 6, 2026-10-17). measured:false = plan target, not enforced yet (Phase 1).",
+  "$comment": "Checked by scripts/perf-budget.mjs (pnpm perf) after pnpm build. Size budgets are ~1.25x the size recorded in `baseline` (stage 6, 2026-10-17). Latency budgets (source: gate:local) are the plan targets; `baseline` is the p95 measured by `pnpm gate:local` in headless chromium against `pnpm dev` (stage 12, 2026-10-17); gate:local fails above `budget`, and pnpm perf re-checks the last .perf/gate-local.json. measured:false = plan target, not measured yet.",
   "budgets": [
     {
       "id": "cli-cold-start",
@@ -24,13 +24,62 @@
       "measured": true,
       "how": "gzip -9 of every .js in apps/web/dist/client/assets"
     },
-    { "id": "command-palette-open", "unit": "ms", "budget": 50, "measured": false },
-    { "id": "route-change", "unit": "ms", "budget": 100, "measured": false },
-    { "id": "gui-first-load-warm", "unit": "ms", "budget": 1000, "measured": false },
-    { "id": "local-agent-event-to-gui", "unit": "ms", "budget": 250, "measured": false },
-    { "id": "mcp-tool-call", "unit": "ms", "budget": 300, "measured": false },
-    { "id": "brain-search", "unit": "ms", "budget": 800, "measured": false },
-    { "id": "cloud-run-start", "unit": "ms", "budget": 15000, "measured": false },
-    { "id": "local-to-cloud-handoff", "unit": "ms", "budget": 10000, "measured": false }
+    {
+      "id": "command-palette-open",
+      "unit": "ms",
+      "budget": 50,
+      "measured": false
+    },
+    {
+      "id": "route-change",
+      "unit": "ms",
+      "budget": 100,
+      "baseline": 32,
+      "measured": true,
+      "source": "gate:local",
+      "how": "p95 of 20 sidebar clicks (Needs you <-> Projects): click -> target <h1> rendered with data, next frame. Same tab, after one warm-up visit. vite dev build"
+    },
+    {
+      "id": "gui-first-load-warm",
+      "unit": "ms",
+      "budget": 1000,
+      "baseline": 93,
+      "measured": true,
+      "source": "gate:local",
+      "how": "p95 of 5 reloads of / with a warm browser cache: navigationStart -> load event. vite dev build (unbundled modules, 304s)"
+    },
+    {
+      "id": "local-agent-event-to-gui",
+      "unit": "ms",
+      "budget": 250,
+      "baseline": 68,
+      "measured": true,
+      "source": "gate:local",
+      "how": "p95 over 40 fake-agent burst messages (25 ms apart): daemon emittedAt (Date.now() at queue) -> the run page's DOM has the message (MutationObserver, performance.timeOrigin+now; same machine clock). Path: daemon WS -> RunLog DO -> viewer WS -> rAF batch -> React"
+    },
+    {
+      "id": "mcp-tool-call",
+      "unit": "ms",
+      "budget": 300,
+      "measured": false
+    },
+    {
+      "id": "brain-search",
+      "unit": "ms",
+      "budget": 800,
+      "measured": false
+    },
+    {
+      "id": "cloud-run-start",
+      "unit": "ms",
+      "budget": 15000,
+      "measured": false
+    },
+    {
+      "id": "local-to-cloud-handoff",
+      "unit": "ms",
+      "budget": 10000,
+      "measured": false
+    }
   ]
 }

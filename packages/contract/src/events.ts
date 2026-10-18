@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Id, MachineId, Run, RunState } from './schemas';
+import { HttpUrl, Id, MachineId, Run, RunState } from './schemas';
 
 /* ------------------------------------------------------------------------------------------------
  * AgentEvent: the one normalized shape every adapter (claude-code, codex, fake) emits.
@@ -109,7 +109,7 @@ export const runEventPayloads = {
   'diff.snapshot': DiffSnapshot,
   'user.message': UserMessage,
   'run.cancel_requested': z.object({ by: Id }),
-  'pr.opened': z.object({ url: z.url(), run: Run }),
+  'pr.opened': z.object({ url: HttpUrl, run: Run }),
 } as const;
 export type RunEventType = keyof typeof runEventPayloads;
 export const runEventTypes = Object.keys(runEventPayloads) as RunEventType[];

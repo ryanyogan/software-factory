@@ -11,6 +11,7 @@ import { Link } from '@tanstack/react-router';
 import { GitPullRequestIcon } from 'lucide-react';
 import { formatCost, needsYouReason } from '@/lib/transcript';
 import { Time } from './page';
+import { ExternalLink } from './external-link';
 import { StateBadge } from './state-badge';
 
 /** Runs list. `reason` adds the Needs-you reason + PR link; `task` adds the task column. */
@@ -56,16 +57,14 @@ export function RunsTable({
                 <span className="flex items-center gap-2">
                   {needsYouReason(r)}
                   {r.prUrl && (
-                    <a
+                    <ExternalLink
                       href={r.prUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
                       className="flex items-center gap-1 text-foreground hover:underline"
                       data-testid="pr-link"
                     >
                       <GitPullRequestIcon className="size-3.5" />
                       PR
-                    </a>
+                    </ExternalLink>
                   )}
                 </span>
               </TableCell>

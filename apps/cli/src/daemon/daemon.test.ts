@@ -194,6 +194,39 @@ describe('sf daemon (fake agent, in-memory API)', () => {
     expect(await git(s.repo, ['rev-list', '--count', `main..${s.task.branch}`])).toBe('2');
   });
 
+  it('picks up a follow-up sent while the daemon was offline when it starts again', async () => {
+    const s = await setup();
+    const sc: FakeScriptInput = {
+      turns: [{ steps: [{ type: 'write', path: 'a.md', content: '{{prompt}}\n' }] }],
+    };
+    const d = await s.daemon('mch_a', sc);
+    const run = await s.start();
+    await waitFor(async () => (await s.run(run.id)).state === 'review', 'first review');
+    await d.idle();
+    await d.stop(2000);
+
+    // No daemon is listening: the message is only in the log.
+    await s.hub.client.call('run.message', { id: run.id, text: 'offline follow-up' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await s.run(run.id)).state).toBe('review');
+
+    const d2 = await s.daemon('mch_a', sc);
+    await waitFor(() => d2.stats.resumed === 1, 'resume on startup');
+    await waitFor(async () => {
+      const turns = s.hub.events(run.id).filter((e) => e.type === 'diff.snapshot');
+      return turns.length === 2 && (await s.run(run.id)).state === 'review';
+    }, 'second review');
+    const last = s.hub.events(run.id).findLast((e) => e.type === 'diff.snapshot')!;
+    expect((last.payload as { patch: string }).patch).toContain('+offline follow-up');
+
+    // A restart with nothing new does not resume again.
+    await d2.idle();
+    await d2.stop(2000);
+    const d3 = await s.daemon('mch_a', sc);
+    await d3.idle();
+    expect(d3.stats.resumed).toBe(0);
+  });
+
   it('cancels a running agent → abandoned', async () => {
     const s = await setup();
     await s.daemon('mch_a', { turns: [{ steps: [{ type: 'sleep', ms: 5000 }] }] });

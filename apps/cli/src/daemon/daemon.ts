@@ -154,8 +154,23 @@ export class Daemon {
     return this.scanning;
   }
 
-  /** Runs this machine left `running` (crash/kill): no agent is behind them any more → failed. */
+  /**
+   * Startup recovery. Runs this machine left `running` (crash/kill) have no agent behind them any
+   * more → failed. Runs of ours in review/failed with a follow-up sent while no daemon was listening
+   * (a `user.message` after the last `run.state → review|failed`) are queued for resume.
+   */
   private async recoverStale(runs: Run[]): Promise<void> {
+    for (const r of runs) {
+      if (
+        (r.state === 'review' || r.state === 'failed') &&
+        r.claimedBy === this.opts.machineId &&
+        !this.workers.has(r.id) &&
+        (await this.hasUnhandledFollowUp(r.id).catch(() => false))
+      ) {
+        this.log(`[${r.id}] follow-up arrived while the daemon was offline → resuming`);
+        if (!this.resumeWanted.has(r.id)) this.resumeWanted.set(r.id, []);
+      }
+    }
     for (const r of runs) {
       if (r.state !== 'running' || r.claimedBy !== this.opts.machineId || this.workers.has(r.id))
         continue;
@@ -163,6 +178,21 @@ export class Daemon {
       await this.client
         .call('run.update', { id: r.id, machineId: this.opts.machineId, state: 'failed' })
         .catch((e: unknown) => this.log(`[${r.id}] recover failed: ${String(e)}`));
+    }
+  }
+
+  private async hasUnhandledFollowUp(runId: string): Promise<boolean> {
+    let lastEnd = 0;
+    let lastMessage = 0;
+    for (let since = 0; ;) {
+      const { events } = await this.client.call('run.events', { id: runId, since, limit: 1000 });
+      for (const e of events) {
+        const to = (e.payload as { to?: string } | null)?.to;
+        if (e.type === 'run.state' && (to === 'review' || to === 'failed')) lastEnd = e.seq;
+        if (e.type === 'user.message') lastMessage = e.seq;
+      }
+      if (events.length < 1000) return lastMessage > lastEnd;
+      since = events.at(-1)!.seq;
     }
   }
 

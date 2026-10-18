@@ -19,7 +19,8 @@ pnpm monorepo (pnpm 11, node 24) on VoidZero tooling via Vite+ (`vp`). Build log
 
 ## Layout
 
-- `apps/` — `web` (TanStack Start on Cloudflare), `api` (`sf-api` Worker: REST `/v1/commands/:name` + `ApiRpc` RPC entrypoint + `ProjectRoom`/`RunLog` DOs + Better Auth), `cli` (`sf`), `mcp`.
+- `apps/` — `web` (TanStack Start on Cloudflare; live run view `/runs/$runId`), `api` (`sf-api` Worker: REST `/v1/commands/:name` + `ApiRpc` RPC entrypoint + `ProjectRoom`/`RunLog` DOs + Better Auth), `cli` (`sf`, incl. `sf daemon` in `apps/cli/src/daemon`), `mcp` (stub).
+- `sf daemon` (one per machine): claims queued `local` runs of `sf link`ed repos over the ProjectRoom WS, runs the adapter in a worktree per task (`$XDG_DATA_HOME/sf/worktrees/<project>/<task>`, `SF_DATA_DIR` overrides), writes events to the RunLog WS (HTTP fallback), diff per turn, commit + PR (`--pr-provider gh|fake|none`) → `review`. Follow-ups resume the session (also ones sent while it was off). Config: `SF_CONFIG_DIR` (default `~/.config/sf`).
 - `packages/contract` — zod command definitions (`commands` registry) + typed HTTP `createClient`. The one API.
 - `packages/core` — handlers keyed by command name + `dispatch(ctx, name, rawInput)`.
 - `packages/db` — Drizzle schema for D1; migrations in `packages/db/drizzle`.
@@ -36,9 +37,11 @@ Internal packages export TypeScript source directly (`exports: "./src/index.ts"`
 - `pnpm test` — `vp run -r test` (Vitest 5 via Vite+; import from `vite-plus/test`)
 - `pnpm typecheck` — `tsc --noEmit` in every package
 - `pnpm build` — `vp run -r build`
-- `pnpm dev` — web + api (auxiliary worker) on http://localhost:5173; `pnpm db:migrate:local` first (shared state in `apps/api/.wrangler/state`)
+- `pnpm dev` — web + api (auxiliary worker) on http://localhost:5173; `pnpm db:migrate:local` first (shared state in `apps/api/.wrangler/state`; `SF_STATE_DIR` overrides for both). `pnpm db:reset:local` wipes local state and re-migrates (the user's data — only when asked)
 - `pnpm sf <cmd>` — run the built CLI (`pnpm --filter @sf/cli build` first; `--api`/`SF_API_URL`, default http://localhost:5173)
 - `pnpm gate` — Phase 0 gate (`scripts/gate.sh`): starts dev, CLI creates project/task/run, asserts the web task page lists the run, stops dev
+- `pnpm gate:local` — Phase 1 gate (`scripts/gate-local.sh` + `scripts/gate-local.mjs`, fake agent script `scripts/gate-local.fake.json`): dev + `sf daemon --pr-provider fake` + temp repo + headless chromium (playwright-core; needs a chromium, fails without one); asserts the live run view, browser follow-up, review + PR + commit, cancel; enforces the latency budgets and writes `.perf/gate-local.json`. Both gates need port 5173 free and use temp state/config/data dirs
+- `pnpm perf` — size/CLI budgets after `pnpm build`, plus the last `gate:local` latency p95s (`perf-budget.json`)
 - shadcn: run `pnpm dlx shadcn@4.22.0 add <component>` from `apps/web` (writes to `packages/ui`)
 - `pnpm --filter @sf/db db:generate` — generate a Drizzle migration after editing `packages/db/src/schema.ts`
 
@@ -47,4 +50,6 @@ Internal packages export TypeScript source directly (`exports: "./src/index.ts"`
 - Every surface (web, CLI, MCP) goes through `@sf/core` `dispatch` with names from `@sf/contract`. Add a command = contract def + handler + test.
 - Config files import `defineConfig` from `vite-plus`; tests import from `vite-plus/test`.
 - `vite` is overridden to `@voidzero-dev/vite-plus-core` in `pnpm-workspace.yaml`; don't add a separate `vite`/`vitest` version.
+- Tests never spend tokens: use the `fake` adapter; real agents only via the manual `smoke` script.
+- URLs rendered as links come from `HttpUrl` (http/https only) in the contract and render through `ExternalLink` / `safeHref` in the web app.
 - Fetch current docs (Context7) before using version-dependent APIs. Use the Cloudflare skills for Workers/DO/wrangler work.

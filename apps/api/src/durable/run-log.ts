@@ -1,5 +1,11 @@
 import { DurableObject } from 'cloudflare:workers';
-import { RunLogClientFrame, type RunLogServerFrame, type StoredRunEvent } from '@sf/contract';
+import {
+  RunLogClientFrame,
+  type RunLogServerFrame,
+  type RunState,
+  type StoredRunEvent,
+  TERMINAL_RUN_STATES,
+} from '@sf/contract';
 import type { RunEventInput } from '@sf/core';
 import { SF_HEADERS } from './identity';
 
@@ -28,6 +34,11 @@ const toEvent = (r: EventRow): StoredRunEvent => ({
   ...(r.emitted_at === null ? {} : { emittedAt: r.emitted_at }),
 });
 
+const isTerminal = (payload: unknown): boolean => {
+  const to = (payload as { to?: string } | null)?.to;
+  return to !== undefined && TERMINAL_RUN_STATES.has(to as RunState);
+};
+
 const COLS = 'seq, type, payload, at, emitted_at';
 
 /**
@@ -37,6 +48,9 @@ const COLS = 'seq, type, payload, at, emitted_at';
  * `run.cancel_requested` on its writer socket), except back to the writer socket that sent it.
  */
 export class RunLog extends DurableObject<Env> {
+  /** Whether the run reached a terminal state (from the log's own `run.state` events); lazy. */
+  private ended: boolean | undefined;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     const sql = ctx.storage.sql;
@@ -72,10 +86,26 @@ export class RunLog extends DurableObject<Env> {
         event.key ?? null,
       )
       .toArray();
-    if (rows[0]) return { stored: toEvent(rows[0]), fresh: true };
+    if (rows[0]) {
+      if (event.type === 'run.state') this.ended = isTerminal(event.payload);
+      return { stored: toEvent(rows[0]), fresh: true };
+    }
     // Duplicate idempotency key: return the original, don't re-broadcast.
     const dup = sql.exec<EventRow>(`SELECT ${COLS} FROM events WHERE key = ?`, event.key).one();
     return { stored: toEvent(dup), fresh: false };
+  }
+
+  /** One indexed-PK scan for the newest `run.state`, then cached and kept current by `insert`. */
+  private isEnded(): boolean {
+    if (this.ended === undefined) {
+      const last = this.ctx.storage.sql
+        .exec<{ payload: string }>(
+          `SELECT payload FROM events WHERE type = 'run.state' ORDER BY seq DESC LIMIT 1`,
+        )
+        .toArray()[0];
+      this.ended = last ? isTerminal(JSON.parse(last.payload)) : false;
+    }
+    return this.ended;
   }
 
   private broadcast(events: StoredRunEvent[], except?: WebSocket): void {
@@ -158,6 +188,10 @@ export class RunLog extends DurableObject<Env> {
     const frame = RunLogClientFrame.safeParse(raw);
     if (!frame.success) {
       return reply({ type: 'error', code: 'invalid_input', message: frame.error.message });
+    }
+    // Writer auth is checked at connect; once the run is merged/abandoned its log is closed to daemons.
+    if (this.isEnded()) {
+      return reply({ type: 'error', code: 'forbidden', message: 'run has ended' });
     }
     const stored = this.appendAndPush(frame.data.events, ws);
     reply({ type: 'ack', seqs: stored.map((e) => e.seq) });

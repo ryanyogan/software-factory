@@ -106,6 +106,27 @@ describe('run.claim', () => {
   });
 });
 
+describe('link urls (XSS: z.url() alone accepts javascript:)', () => {
+  it('rejects a non-http(s) prUrl on run.update and repoUrl on project.create', async () => {
+    const run = await claimed();
+    for (const prUrl of ['javascript:alert(1)', 'data:text/html,<script>x</script>']) {
+      await expect(
+        dispatch(owner, 'run.update', { id: run.id, machineId: M1, prUrl }),
+      ).rejects.toMatchObject({ code: 'invalid_input' });
+    }
+    expect((await dispatch(owner, 'run.get', { id: run.id })).prUrl).toBeNull();
+    await expect(
+      dispatch(owner, 'project.create', { name: 'X', repoUrl: 'javascript:alert(1)' }),
+    ).rejects.toMatchObject({ code: 'invalid_input' });
+  });
+
+  it('reads a legacy unsafe prUrl row back as null instead of failing', async () => {
+    const run = await claimed();
+    await owner.db.update(runs).set({ prUrl: 'javascript:alert(1)' }).where(eqId(run.id));
+    expect((await dispatch(owner, 'run.get', { id: run.id })).prUrl).toBeNull();
+  });
+});
+
 describe('run.update', () => {
   it('lets the claimer record session/cost and finish in review (endedAt stamped)', async () => {
     const run = await claimed();

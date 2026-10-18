@@ -1,12 +1,23 @@
 import { z } from 'zod';
 import { defineCommand } from './define';
 import { DaemonEventBatch, StoredRunEvent, UserMessage } from './events';
-import { Agent, Id, MachineId, Project, Prompt, Run, RunLocation, RunState, Task } from './schemas';
+import {
+  Agent,
+  HttpUrl,
+  Id,
+  MachineId,
+  Project,
+  Prompt,
+  Run,
+  RunLocation,
+  RunState,
+  Task,
+} from './schemas';
 
 export const projectCreate = defineCommand({
   name: 'project.create',
   summary: 'Create a project, optionally linked to a git repository.',
-  input: z.object({ name: Project.shape.name, repoUrl: z.url().optional() }),
+  input: z.object({ name: Project.shape.name, repoUrl: HttpUrl.optional() }),
   output: Project,
   http: { method: 'POST', path: '/v1/projects' },
 });
@@ -90,7 +101,7 @@ export const runUpdate = defineCommand({
     state: RunState.optional(),
     sessionId: Run.shape.sessionId.unwrap().optional(),
     costUsd: Run.shape.costUsd.unwrap().optional(),
-    prUrl: Run.shape.prUrl.unwrap().optional(),
+    prUrl: HttpUrl.optional(),
     /** Defaults to now when entering review/failed/abandoned/merged. */
     endedAt: Run.shape.endedAt.unwrap().optional(),
   }),

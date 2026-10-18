@@ -20,6 +20,12 @@ export type Block =
   | { t: 'quote'; c: Block[] }
   | { t: 'hr' };
 
+/** http(s) only — for URLs that come from data (PR, repo), not from markdown. */
+export function webHref(href: string): string | null {
+  const h = href.trim();
+  return /^https?:\/\//i.test(h) ? h : null;
+}
+
 export function safeHref(href: string): string | null {
   const h = href.trim();
   return /^(https?:\/\/|mailto:)/i.test(h) ? h : null;

@@ -18,8 +18,11 @@ export default defineConfig(({ mode }) => ({
             // sf-api runs in the same Miniflare instance as an auxiliary worker.
             auxiliaryWorkers: [{ configPath: '../api/wrangler.jsonc' }],
             // Share local D1/DO state with `wrangler dev` in apps/api (one DB, one migrate command).
+            // SF_STATE_DIR points it elsewhere (the gates use a temp dir so they never touch dev data).
             persistState: {
-              path: fileURLToPath(new URL('../api/.wrangler/state', import.meta.url)),
+              path:
+                process.env.SF_STATE_DIR ||
+                fileURLToPath(new URL('../api/.wrangler/state', import.meta.url)),
             },
           }),
           tailwindcss(),
