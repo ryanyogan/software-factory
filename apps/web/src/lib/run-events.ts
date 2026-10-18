@@ -71,6 +71,7 @@ export function useRunEvents(runId: string): SocketStatus {
       setStatus('connecting');
       ws = new WebSocket(`${proto}//${location.host}/v1/runs/${runId}/events?since=${since}`);
       ws.onopen = () => {
+        if (stopped) return;
         attempt = 0;
         setStatus('live');
       };
@@ -86,8 +87,10 @@ export function useRunEvents(runId: string): SocketStatus {
         }
       };
       ws.onclose = () => {
-        setStatus('closed');
+        // A socket from an unmounted effect (StrictMode remount, runId change) must not touch status:
+        // it can close after the replacement socket is already live.
         if (stopped) return;
+        setStatus('closed');
         retry = setTimeout(connect, Math.min(10_000, 500 * 2 ** attempt++));
       };
     };
