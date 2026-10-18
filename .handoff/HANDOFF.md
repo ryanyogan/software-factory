@@ -602,3 +602,9 @@ against the deployed environment.
   - 16 `/mcp` in sf-api from the contract + daemon injection (claude/codex/fake `mcp` step) + codex name normalization + `mcp-tool-call` budget
   - 17 indexing: D1 chunk/FTS5 tables, Vectorize + embeddings adapter via AI Gateway, GitHub webhook → Queue → Workflow, merged-PR review comments (creates queues/index/gateway/secrets)
   - 18 GUI context panel + search, `pnpm gate:brain`, adoption metric, deployed smoke, docs
+
+### First CI run + socket status fix (orchestrator, 2026-10-17)
+- Repo is public at github.com/ryanyogan/software-factory (made public so Actions minutes are free). The Renovate onboarding PR is ignored on purpose.
+- First CI run: everything passed except `gate:local`. The run page's `ws-status` stayed `closed`. Cause: in `useRunEvents`, a socket from an unmounted effect (StrictMode remount in dev, or a runId change) called `setStatus('closed')` before checking `stopped`. On the slower runner it closed after the replacement socket was live. Fixed in `apps/web/src/lib/run-events.ts` (`onopen` and `onclose` return early when stopped). CI is green (run 39085662367, 2m05s).
+- On failure, `gate:local` now prints page errors, the ws-status text and a browser trail (navigations, socket open/close/error, failed requests), and writes `.perf/gate-local-failure.{png,html}`. CI uploads `.perf/` plus the kept logs (`SF_GATE_KEEP=1`) as the `gate-local-failure` artifact.
+- No unit test for the hook (web tests run in plain Node with no DOM). `gate:local` covers it.

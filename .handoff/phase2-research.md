@@ -532,7 +532,7 @@ cd ../.. && SF_API_URL=https://sf-web.ryanyogan.workers.dev pnpm sf login
 6. **`auth-client.ts` SSR `baseURL: 'http://localhost'`** is only used server-side for the client object. It's harmless unless an SSR path calls `authClient` (none found), but worth a comment.
 7. **D1 placeholder id:** the vite plugin and `--local` don't care about the real id, so committing it is fine (not a secret).
 8. **CI deploy job** is commented out and stays so; Actions budget is blocked. Deploy by hand.
-9. **`.github/workflows/ci.yml` and `scripts/gate-local.mjs` had uncommitted edits** at research time (not from this stage). The next stage should check them before committing.
+9. ~~`ci.yml` / `gate-local.mjs` had uncommitted edits~~ — resolved: the orchestrator committed them (5dd5d74, CI failure evidence) while research ran.
 
 **Prod smoke (stage 14):**
 - `curl -s https://sf-web.ryanyogan.workers.dev/api/auth/get-session` → `null`/200
