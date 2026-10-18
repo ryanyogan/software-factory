@@ -520,3 +520,51 @@ Caveats: measured against `pnpm dev` (unbundled vite modules, workerd in-process
 2. `apps/mcp`: McpAgent server with tools generated from the `@sf/contract` registry (same `dispatch`), plus the `mcp-tool-call` 300 ms budget measured like gate:local.
 3. `packages/brain`: org-brain storage + search (`brain-search` 800 ms budget), then skills sync.
 4. Small carry-overs: `run.list {state, location}` filter for the daemon, catch-up on reconnect, worktree cleanup on merge/abandon, a daemon heartbeat for the web hint.
+
+---
+
+## Goal of this build: Phase 2 "Brain + registry" (prepped 2026-10-17)
+
+From the plan doc's roadmap widget: **2 · Brain + registry, 4 weeks. Scope: remote MCP server, skills sync, context packs,
+project indexing. Gate: brain MCP tools used in half of all runs.** Plan sections: "Org brain and the shared registry" and the
+Architecture table in `.handoff/plan.md` (AI Search for retrieval, Queues + Workflows for indexing, McpAgent + OAuth for MCP,
+AI Gateway for model calls, R2 for blobs).
+
+Technical gate for this build (`pnpm gate:brain`, final stage): in a linked repo, the daemon starts a fake-agent run whose
+context pack contains an org standard + a project file hit + a skill; the fake agent calls `brain.search` over the sf MCP
+server and the call is recorded in the RunLog; `sf context` prints the same pack; `sf skills sync` writes the resolved skills
+into `.claude/skills/` and `.codex/`; a metric `brain_tool_runs / runs` is computed from RunLog tool calls. Plus a smoke
+against the deployed environment.
+
+### Phase 2 decisions (user said "go with your picks", 2026-10-17)
+1. **First deploy is stage 1 of Phase 2.** AI Search / Workflows / Queues can't be fully exercised in `pnpm dev`, and the
+   dogfood week needs a real URL. wrangler is logged in (ryanyogan@gmail.com). The user must create the GitHub OAuth app
+   (callback `<prod-url>/api/auth/callback/github`); everything else follows README's deploy checklist. Keep `SF_DEV_AUTH` off
+   in prod. Use `workers.dev` URLs unless the user names a domain.
+2. **Registry = a plain GitHub repo** (not Cloudflare Artifacts): `skills/`, `plugins/`, `prompts/`, `org/` in Agent Skills
+   SKILL.md format; changes via normal PRs; sf syncs it (webhook or periodic fetch → R2/D1 cache). Artifacts can come later.
+3. **Durable facts = markdown in the registry** (`org/decisions/*.md` etc.), not Cloudflare Agent Memory. `decisions.record`
+   opens a PR against the registry rather than writing a hidden store.
+4. **No brain chat in the GUI this phase.** Ship search, context packs, MCP, skills sync. GUI gets a read-only "Context" panel
+   on task/run pages (the pack + citations) and a search box. `sf ask` may be a thin search-and-summarize only if cheap; else defer.
+5. **MCP server** = `apps/mcp` (`McpAgent` + OAuth via Better Auth / the existing session), tools GENERATED from `@sf/contract`
+   (every command becomes a tool) plus brain tools defined as contract commands too: `brain.search`, `brain.context_for_task`,
+   `skills.resolve`, `decisions.record`. One contract, three surfaces stays true.
+6. **Daemon injects the brain into every run**: sf MCP server configured for the agent (Claude SDK `mcpServers`, Codex
+   config) with the run's credentials, plus the context pack prepended to the first prompt. This is how the "half of all runs"
+   gate is reachable without relying on engineers remembering.
+7. **Indexing**: per-project AI Search instance; Queue → Workflow chunks code by symbol (start with a simple language-agnostic
+   chunker + tree-sitter later if needed), reindexes changed files on push (GitHub webhook), and indexes merged-PR review
+   comments. Model/embedding calls go through AI Gateway for cost tracking.
+8. Tests never spend tokens or hit remote AI Search: brain behind a `BrainPort` with an in-memory fake in tests and the gate.
+9. Each stage ends with check/typecheck/test/build/perf/gate/gate:local passing and one commit. Pushing to origin is allowed
+   after a green stage (repo is private; CI is currently blocked by the user's Actions budget, not by code).
+
+### Phase 2 stages (tentative; research may reshape 15–17)
+- 13 research → `.handoff/phase2-research.md` (McpAgent + OAuth on Workers, AI Search API + bindings + local-dev story,
+  Workflows/Queues, AI Gateway, Claude SDK / Codex MCP config, GitHub webhooks, SKILL.md format, deploy specifics)
+- 14 first deploy (api + web + D1 + secrets + GitHub OAuth) + prod smoke; needs the user's OAuth app
+- 15 contract brain commands + `BrainPort` + registry sync + `sf skills sync` + `sf context`
+- 16 indexing pipeline (Queues/Workflows/AI Search) + GitHub webhook
+- 17 `apps/mcp` server generated from the contract + daemon injection
+- 18 GUI context panel + search, `pnpm gate:brain`, adoption metric, docs
